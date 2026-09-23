@@ -105,6 +105,17 @@ try {
   ok(r.status === 401, '无口令动作被拒');
   r = await req('POST', '/api/join', { code: p1.code, claimRole: 'p1', passcode: 'wrong' });
   ok(r.status === 401, '错误口令认领被拒');
+  for (const [url, fields] of [
+    ['/api/recover', { recoveryCode: p1.recoveryCode }],
+    ['/api/recovery', { token: p1.token }],
+  ]) {
+    for (const passcode of [undefined, 'wrong']) {
+      const before = readFileSync(server.dataFile, 'utf8');
+      r = await req('POST', url, { code: p1.code, ...fields, passcode }, false);
+      ok(r.status === 401 && r.data.error === 'need-passcode', `${url} 缺少或错误口令被拒`);
+      ok(readFileSync(server.dataFile, 'utf8') === before, `${url} 门禁拒绝不修改身份`);
+    }
+  }
 
   console.log('—— SSE 口令 / 网页门禁 ——');
   r = await req('GET', `/events?code=${p1.code}&token=${p1.token}`);
@@ -134,7 +145,7 @@ try {
   const bFeed = await server.observe(b.code, b.token, PASS);
   await bFeed.wait((snap) => snap.players.p1.online, 'B 上线');
   await failMutation('/api/join', { code: b.code, name: 'B 的伙伴' }, '加入失败', bFeed, b);
-  ok(saved()[b.code].players.p2 === null && saved()[b.code].phase === 'lobby', '失败加入不占身份或修改房间阶段');
+  ok(!saved()[b.code].players.p2 && Object.values(saved()[b.code].players).filter(Boolean).length === 1 && saved()[b.code].phase === 'lobby', '失败加入不占身份或修改房间阶段');
   r = await req('POST', '/api/join', { code: b.code, name: 'B 的伙伴' });
   ok(r.status === 200 && saved()[b.code].players.p2.token === r.data.token, '失败加入恢复后可以重试');
   await bFeed.close();
@@ -144,6 +155,9 @@ try {
   ok(r.status === 403 && Object.keys(saved()).length === 3, '第 4 个房间被拒（上限 3）');
 
   console.log('—— 改名 / 开账 / 确认失败不改变内存 ——');
+  await failMutation('/api/recover', { code: p1.code, recoveryCode: p1.recoveryCode }, '恢复身份失败');
+  await failMutation('/api/recovery', { code: p1.code, token: p1.token }, '重置恢复码失败');
+  ok((await req('GET', `${pingUrl}&passcode=${encodeURIComponent(PASS)}`)).status === 200, '身份写入失败保留旧 token 及活跃连接');
   await failMutation('/api/action', actionBody(p1, 'setMe', { name: '失败改名' }), '改名失败');
   await change(p1, 'setMe', { name: '重试改名' });
   ok(s.players.p1.name === '重试改名', '恢复写入后改名可重试');
@@ -174,21 +188,21 @@ try {
   console.log('—— 还款容量上限 / 删除还款 / 清空 ——');
   const consumption = structuredClone(s.history);
   for (let i = 0; i < 2; i++) {
-    await change(i === 0 ? p1 : p2, 'repay', { amountCents: 1 });
+    await change(i === 0 ? p1 : p2, 'repay', { from: 'p2', to: 'p1', amountCents: 1 });
     const pending = s.ledgerPending;
     ok(s.repayments.length === i && pending.from === 'p2' && pending.to === 'p1', `第 ${i + 1} 笔还款提议不占已确认记录`);
     await approve(i === 0 ? p2 : p1, pending.id);
     ok(s.repayments.length === i + 1, `第 ${i + 1} 笔还款确认后入账`);
   }
   ok(equal(s.history, consumption), '消费满额不阻止还款，且还款不占用或改变消费/手气记录');
-  await rejected(p1, 'repay', { amountCents: 1 }, '第 3 笔还款提议被拒（还款上限 2）');
+  await rejected(p1, 'repay', { from: 'p2', to: 'p1', amountCents: 1 }, '第 3 笔还款提议被拒（还款上限 2）');
   ok(saved()[p1.code].ledgerPending === null && saved()[p1.code].repayments.length === 2, '还款超限不残留提议或额外记录');
   const repaymentId = s.repayments[0].id;
   await change(p2, 'deleteRepayment', { id: repaymentId });
   ok(s.repayments.length === 2 && s.ledgerPending.repaymentId === repaymentId, '还款满额时仍可提议删除');
   await approve(p1, s.ledgerPending.id);
   ok(s.repayments.length === 1 && !s.repayments.some((item) => item.id === repaymentId), '双人确认释放还款容量');
-  await change(p1, 'repay', { amountCents: 1 });
+  await change(p1, 'repay', { from: 'p2', to: 'p1', amountCents: 1 });
   await approve(p2, s.ledgerPending.id);
   ok(s.repayments.length === 2 && equal(s.history, consumption), '删除后可以再次还款且不改消费');
   await change(p1, 'clearHistory');
@@ -236,6 +250,10 @@ try {
       await server.stop('SIGKILL');
       const legacyData = saved();
       delete legacyData[p1.code].bill.pending.id;
+      delete legacyData[p1.code].bill.pending.required;
+      delete legacyData[p1.code].bill.pending.approvals;
+      delete legacyData[p1.code].bill.participants;
+      delete legacyData[p1.code].bill.required;
       writeFileSync(file, JSON.stringify(legacyData));
       await reload();
       const migratedId = s.bill.pending.id;
@@ -274,6 +292,13 @@ try {
   delete legacyRoom.repayments;
   delete legacyRoom.ledgerPending;
   delete legacyRoom.faces;
+  delete legacyRoom.capacity;
+  delete legacyRoom.repaymentCarry;
+  for (const player of Object.values(legacyRoom.players)) delete player.recoveryHash;
+  for (const bill of legacyRoom.history) {
+    delete bill.participants;
+    delete bill.required;
+  }
   legacyRoom.players.p1.online = true;
   legacyRoom.players.p1._conns = 99;
   legacyRoom.players.p2.online = true;
@@ -284,8 +309,13 @@ try {
   const legacyFeed = await legacy.observe(p1.code, p1.token, PASS);
   const initialLegacy = legacyFeed.frames[0];
   ok(initialLegacy.faces === 6 && Array.isArray(initialLegacy.repayments) && initialLegacy.repayments.length === 0 && initialLegacy.ledgerPending === null, '加载老数据补六面骰、repayments=[]、ledgerPending=null');
-  ok(equal(initialLegacy.history, legacyRoom.history) && equal(initialLegacy.balance, expectedBalance(initialLegacy)), '升级保留老消费与净余额');
+  const normalizedHistory = legacyRoom.history.map((bill) => ({ ...bill, participants: ['p1', 'p2'] }));
+  ok(initialLegacy.capacity === 2 && equal(initialLegacy.history, normalizedHistory) && equal(initialLegacy.balance, expectedBalance(initialLegacy)), '升级补充双人成员列表，保留老消费与净余额');
   ok(!initialLegacy.players.p1.online && !initialLegacy.players.p2.online, '加载时不恢复旧在线连接');
+  const legacyRecovery = await legacy.request('POST', '/api/recovery', { passcode: PASS, code: p1.code, token: p1.token });
+  must(legacyRecovery.status === 200 && typeof legacyRecovery.data.recoveryCode === 'string' && legacyRecovery.data.recoveryCode.length > 0, '无 recoveryHash 的旧身份可认证生成恢复码');
+  const recoveredLegacyDisk = JSON.parse(readFileSync(legacyFile, 'utf8'))[p1.code];
+  ok(recoveredLegacyDisk.players.p1.token === p1.token && recoveredLegacyDisk.players.p2.token === p2.token && typeof recoveredLegacyDisk.players.p1.recoveryHash === 'string' && !readFileSync(legacyFile, 'utf8').includes(legacyRecovery.data.recoveryCode), '旧 token 保留且新增恢复码只存 hash');
   r = await legacy.request('POST', '/api/action', { passcode: PASS, code: p1.code, token: p1.token, type: 'setMe', name: '升级后改名' });
   const upgraded = JSON.parse(readFileSync(legacyFile, 'utf8'))[p1.code];
   ok(r.status === 200 && upgraded.players.p1.name === '升级后改名' && upgraded.faces === 6 && equal(upgraded.repayments, []) && upgraded.ledgerPending === null, '升级后的首次修改响应前即写入新结构');
@@ -328,7 +358,8 @@ try {
     const peerFeed = await temporary.observe(guest1.code, guest2.token);
     const duplicateFeed = await temporary.observe(guest1.code, guest1.token);
     let current = await temporaryFeed.wait((snap) => snap.players.p1.online && snap.players.p2?.online, '临时双人在线');
-    ok(current.temporaryMode === true && current.repaymentCarryCents === 0, '临时快照声明模式及初始零汇总');
+    const carry = () => Object.fromEntries(['p1', 'p2'].map((id) => [id, current.repaymentCarry[id] ?? 0]));
+    ok(current.temporaryMode === true && equal(carry(), { p1: 0, p2: 0 }), '临时快照声明模式及初始零汇总');
 
     const reserved = await temporary.request('POST', '/api/create', { name: '从未连接 SSE' });
     must(reserved.status === 200 && reserved.data?.token, '创建预留房间失败');
@@ -338,7 +369,7 @@ try {
 
     const ledger = () => structuredClone({
       history: current.history, repayments: current.repayments,
-      repaymentCarryCents: current.repaymentCarryCents, balance: current.balance,
+      repaymentCarry: carry(), balance: current.balance,
     });
     const update = async (player, type, fields = {}) => {
       const index = temporaryFeed.frames.length;
@@ -346,7 +377,7 @@ try {
       const result = await temporary.request('POST', '/api/action', { code: guest1.code, token: player.token, type, ...fields });
       must(result.status === 200, `临时 ${type}: ${result.status} ${JSON.stringify(result.data)}`);
       current = await temporaryFeed.wait((snap) => snap.version > version, `临时 ${type} 广播`, index);
-      must(current.temporaryMode === true && Number.isSafeInteger(current.repaymentCarryCents), '临时模式及汇总必须包含在每次快照中');
+      must(current.temporaryMode === true && current.repaymentCarry && !Array.isArray(current.repaymentCarry) && Object.keys(current.repaymentCarry).every((id) => ['p1', 'p2'].includes(id)) && Object.values(current.repaymentCarry).every(Number.isSafeInteger) && carry().p1 + carry().p2 === 0 && !('repaymentCarryCents' in current), '临时模式及每人零和整数汇总必须包含在每次快照中');
       must(current.history.length <= 1 && current.repayments.length <= 1, '临时明细不能超过一条');
       must(equal(current.balance, expectedBalance(current)), `临时 ${type} 后消费、还款、汇总与余额不符`);
       return result.data;
@@ -368,34 +399,34 @@ try {
       await update(guest2, 'confirm');
       const latest = current.history[0];
       ok(current.phase === 'idle' && current.bill === null && current.history.length === 1 && latest?.id !== before.history[0]?.id && latest?.amountCents === amountCents && latest?.payer === payer && latest?.note === note && equal(latest?.shares, shares), `${note}：MAX_HISTORY=1 仍可双人入账且仅保留最新消费`);
-      ok(current.repayments.length === 0 && current.repaymentCarryCents === 0 && current.balance.p1 === (payer === 'p1' ? shares.p2 : -shares.p1), `${note}：新确认清理所有旧还款及汇总，余额只来自新账`);
+      ok(current.repayments.length === 0 && carry().p1 === 0 && current.balance.p1 === (payer === 'p1' ? shares.p2 : -shares.p1), `${note}：新确认清理所有旧还款及汇总，余额只来自新账`);
       return latest;
     };
     const repay = async (amountCents) => {
       const before = ledger();
-      await update(guest1, 'repay', { amountCents });
+      await update(guest1, 'repay', { from: before.balance.p1 < 0 ? 'p1' : 'p2', to: before.balance.p1 < 0 ? 'p2' : 'p1', amountCents });
       const pending = current.ledgerPending;
       ok(equal(ledger(), before), '还款提议不提前裁剪已有明细或累计汇总');
       await accept();
       const sign = before.balance.p1 > 0 ? -1 : 1;
       const previousSigned = before.repayments.reduce((sum, item) => sum + (item.from === 'p1' ? item.amountCents : -item.amountCents), 0);
       ok(current.repayments.length === 1 && current.repayments[0].id === pending.id && current.repayments[0].amountCents === amountCents && current.repayments[0].from === (sign === 1 ? 'p1' : 'p2') && current.repayments[0].to === (sign === 1 ? 'p2' : 'p1'), '确认还款只留最新一条，付款方向正确');
-      ok(current.repaymentCarryCents === before.repaymentCarryCents + previousSigned && current.balance.p1 === before.balance.p1 + sign * amountCents && equal(current.history, before.history), '旧还款仅转有符号汇总，余额累计且不改变消费');
+      ok(carry().p1 === before.repaymentCarry.p1 + previousSigned && current.balance.p1 === before.balance.p1 + sign * amountCents && equal(current.history, before.history), '旧还款仅转有符号汇总，余额累计且不改变消费');
     };
-    const isEmpty = (label) => ok(current.history.length === 0 && current.repayments.length === 0 && current.repaymentCarryCents === 0 && equal(current.balance, { p1: 0, p2: 0 }), label);
+    const isEmpty = (label) => ok(current.history.length === 0 && current.repayments.length === 0 && carry().p1 === 0 && equal(current.balance, { p1: 0, p2: 0 }), label);
 
     const firstBill = await completeBill(12000, 'p1', '临时第一笔');
     for (const amount of [11, 17, 23]) await repay(amount);
-    ok(current.repaymentCarryCents === -28 && current.balance.p1 === firstBill.shares.p2 - 51, '三次正向还款余额包含全部 51 分，汇总为 -28 分');
+    ok(carry().p1 === -28 && current.balance.p1 === firstBill.shares.p2 - 51, '三次正向还款余额包含全部 51 分，汇总为 -28 分');
     const latestRepayment = current.repayments[0];
     await update(guest1, 'deleteRepayment', { id: latestRepayment.id });
     await accept();
-    ok(current.repayments.length === 0 && current.repaymentCarryCents === -28 && current.balance.p1 === firstBill.shares.p2 - 28, '删除最新还款仅撤销最近 23 分，汇总保持');
+    ok(current.repayments.length === 0 && carry().p1 === -28 && current.balance.p1 === firstBill.shares.p2 - 28, '删除最新还款仅撤销最近 23 分，汇总保持');
     await repay(7);
-    ok(current.repaymentCarryCents === -28 && current.balance.p1 === firstBill.shares.p2 - 35, '删掉最新还款后继续还款不丢失旧汇总');
+    ok(carry().p1 === -28 && current.balance.p1 === firstBill.shares.p2 - 35, '删掉最新还款后继续还款不丢失旧汇总');
     const confirmed = ledger();
     for (const [type, fields] of [
-      ['repay', { amountCents: 9 }], ['clearHistory', {}],
+      ['repay', { from: 'p2', to: 'p1', amountCents: 9 }], ['clearHistory', {}],
       ['deleteHistory', { id: firstBill.id }], ['deleteRepayment', { id: current.repayments[0].id }],
     ]) {
       await update(guest1, type, fields);
@@ -414,7 +445,7 @@ try {
     const secondBill = await completeBill(18000, 'p2', '临时第二笔');
     await repay(13);
     await repay(19);
-    ok(current.repaymentCarryCents === 13 && current.balance.p1 === -secondBill.shares.p1 + 32, '反向还款汇总为正数且累计抵扣欠款');
+    ok(carry().p1 === 13 && current.balance.p1 === -secondBill.shares.p1 + 32, '反向还款汇总为正数且累计抵扣欠款');
     await update(guest1, 'clearHistory');
     await accept();
     isEmpty('双人清空消费、还款和非零汇总后余额归零');
@@ -432,7 +463,9 @@ try {
       ok(ping.status === 401 && ping.data?.error === 'stale', `${label}：旧身份 ping 失败`);
       const action = await temporary.request('POST', '/api/action', { ...identity, type: 'setMe', name: '不能复活' });
       ok(action.status === 401 && action.data?.error === 'stale', `${label}：旧身份 action 失败`);
-      ok((await temporary.request('POST', '/api/join', { code: identity.code, claimRole: identity.role })).status === 404, `${label}：join 不能认领或复活房间`);
+      ok((await temporary.request('POST', '/api/join', { code: identity.code })).status === 404, `${label}：join 不能复活已销毁房间`);
+      const claim = await temporary.request('POST', '/api/join', { code: identity.code, claimRole: identity.role });
+      ok(claim.status >= 400 && claim.status < 500, `${label}：旧认领入口始终拒绝`);
       const events = await temporary.request('GET', `/events?${query}`);
       ok(events.status === 404 && events.data?.error === 'stale', `${label}：events 无法访问`);
     };

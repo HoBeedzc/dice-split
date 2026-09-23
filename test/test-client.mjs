@@ -182,6 +182,7 @@ test('按钮携带渲染时的提议ID，而不是点击时的新提议ID', asyn
   const c = client();
   c.context.room = { ledgerPending: null, bill: { pending: { id: 'rendered-proposal' } } };
   c.context.document = { getElementById: (id) => buttons.get(id), querySelectorAll: () => [] };
+  c.context.$app = { querySelectorAll: () => [] };
   c.context.api = async (url, body) => { actions.push(body); return { ok: true }; };
   vm.runInContext(bindingsSource, c.context);
   c.context.bindRoomEvents();
@@ -196,4 +197,48 @@ test('按钮携带渲染时的提议ID，而不是点击时的新提议ID', asyn
   ]);
   assert.equal(actions[0].approve, true);
   assert.equal(actions[1].approve, false);
+});
+
+test('金额解析只接受正数且最多两位小数', () => {
+  const context = vm.createContext({});
+  vm.runInContext(html.slice(html.indexOf('function parseCents('), html.indexOf('function openBillSheet(')), context);
+  for (const [input, cents] of [['12.01', 1201], ['.50', 50], ['0.01', 1], [' 20 ', 2000]]) {
+    assert.equal(context.parseCents(input), cents);
+  }
+  for (const input of ['', '0', '-1', '0.001', '1e3', '1.2.3', 'NaN', 'Infinity']) {
+    assert.equal(context.parseCents(input), null);
+  }
+});
+
+test('还款表单按收付双方较小余额及单笔上限计算', () => {
+  const context = vm.createContext({ me: { role: 'p2' }, room: { balance: { p1: 500, p2: -300, p3: -200 } } });
+  vm.runInContext(html.slice(html.indexOf('function repaymentPair('), html.indexOf('function openRepaymentSheet(')), context);
+  assert.deepEqual({ ...context.repaymentPair('p1') }, { from: 'p2', to: 'p1', amount: 300 });
+  context.me.role = 'p1';
+  assert.deepEqual({ ...context.repaymentPair('p3') }, { from: 'p3', to: 'p1', amount: 200 });
+  context.room.balance = { p1: 2000000000, p2: -2000000000 };
+  assert.equal(context.repaymentPair('p2').amount, 1000000000);
+});
+
+test('未参与成员不计算手气，省略还款按成员净额合并', () => {
+  const context = vm.createContext({
+    memberIds: () => ['p1', 'p2', 'p3'],
+    participantsOf: (h) => h.participants,
+    room: {
+      repaymentCarry: { p1: -10, p2: 10 },
+      balance: { p1: 65, p2: -65, p3: 0 },
+      history: [{ amountCents: 100, payer: 'p1', participants: ['p1', 'p2'], shares: { p1: 20, p2: 80 } }],
+      repayments: [{ from: 'p2', to: 'p1', amountCents: 5 }],
+    },
+  });
+  vm.runInContext(html.slice(html.indexOf('function calcStats('), html.indexOf('function progressHtml(')), context);
+  const stats = context.calcStats();
+  assert.equal(stats.total, 100);
+  assert.equal(stats.byMember.p1.luck, -30);
+  assert.equal(stats.byMember.p2.luck, 30);
+  assert.equal(stats.byMember.p3.n, 0);
+  assert.equal(stats.byMember.p3.luck, 0);
+  assert.equal(stats.byMember.p3.share, 0);
+  assert.equal(stats.byMember.p1.repaid, -15);
+  assert.equal(stats.byMember.p2.repaid, 15);
 });

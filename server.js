@@ -3,9 +3,7 @@
 // 公网部署务必设置口令: PASSCODE=你们的暗号 node server.js 80
 // 未设置口令时仅使用内存，房间无人连接即销毁。
 //
-// 房间状态机: lobby(等对方加入) -> idle(可记账) -> rolling(双方掷骰中)
-//             -> result(揭晓, 双方确认) -> 入账回 idle
-// 掷骰随机数由服务器生成并广播，双方都无法本地作弊。
+// 状态: lobby -> idle -> rolling -> result -> idle；结果经所需成员确认后入账。
 
 'use strict';
 const http = require('http');
@@ -19,7 +17,7 @@ const TEMPORARY_MODE = !PASSCODE;
 const ROOM_CONNECT_TIMEOUT_MS = 15000;
 const MAX_ROOMS = Number(process.env.MAX_ROOMS || 100);      // 全服房间数上限，防资源滥用
 const MAX_HISTORY = Number(process.env.MAX_HISTORY || 1000); // 每房间账目条数上限
-const RATE_LIMIT = Number(process.env.RATE_LIMIT || 60);     // 每 IP 每分钟请求数上限（正常两人使用远低于此）
+const RATE_LIMIT = Number(process.env.RATE_LIMIT || 240);    // 同一网络的八位成员会共享 IP 限额。
 const DATA_FILE = process.env.DICE_DATA || path.join(__dirname, 'dice-split-data.json');
 const INDEX_HTML = path.join(__dirname, 'public', 'index.html');
 
@@ -112,19 +110,47 @@ function persist(room) {
 if (!TEMPORARY_MODE && fs.existsSync(DATA_FILE)) {
   const data = JSON.parse(fs.readFileSync(DATA_FILE, 'utf8'));
   for (const [code, r] of Object.entries(data)) {
-    r.players.p1.online = false;
-    r.players.p1._conns = 0;
-    if (r.players.p2) {
-      r.players.p2.online = false;
-      r.players.p2._conns = 0;
+    r.capacity ??= 2;
+    const ids = memberIds(r);
+    for (const id of ids) {
+      r.players[id].online = false;
+      r.players[id]._conns = 0;
     }
-    if (!r.faces) r.faces = 6;
+    r.faces ||= 6;
     r.repayments ??= [];
     r.ledgerPending ??= null;
-    if (r.bill?.pending) r.bill.pending.id ??= newToken();
+    r.repaymentCarry ??= {};
+    if (r.repaymentCarryCents) {
+      r.repaymentCarry.p1 = r.repaymentCarryCents;
+      r.repaymentCarry.p2 = -r.repaymentCarryCents;
+    }
+    delete r.repaymentCarryCents;
+    for (const h of r.history) h.participants ??= Object.keys(h.shares);
+    if (r.bill) {
+      r.bill.participants ??= Object.keys(r.bill.rolls);
+      r.bill.required ??= [...r.bill.participants];
+      if (r.bill.pending) upgradeProposal(r.bill.pending, r.bill.required);
+    }
+    if (r.ledgerPending) {
+      const p = r.ledgerPending;
+      const repayment = r.repayments.find((item) => item.id === p.repaymentId);
+      const required = p.type === 'repay' ? [p.from, p.to]
+        : p.type === 'deleteRepayment' && repayment ? [repayment.from, repayment.to] : ids;
+      upgradeProposal(p, required);
+    }
     rooms.set(code, r);
   }
   console.log(`已从数据文件恢复 ${rooms.size} 个房间`);
+}
+
+function memberIds(room) {
+  return Object.keys(room.players).filter((id) => room.players[id]);
+}
+
+function upgradeProposal(proposal, required) {
+  proposal.id ??= newToken();
+  proposal.required ??= [...required];
+  proposal.approvals ??= { [proposal.by]: true };
 }
 
 // ---------- 工具 ----------
@@ -191,64 +217,69 @@ function sanitizeAvatar(s, fallback) {
   return /^[\p{Emoji_Presentation}\p{Extended_Pictographic}]$/u.test(s) ? s : fallback;
 }
 
-// 按点数比例拆分金额（单位: 分）。前者按比例四舍五入，余数归后者，保证合计相等。
-function splitByRatio(totalCents, r1, r2) {
-  const s1 = Math.round((totalCents * r1) / (r1 + r2));
-  return { s1, s2: totalCents - s1 };
+function splitByRatio(totalCents, participants, rolls) {
+  const sum = participants.reduce((n, id) => n + rolls[id], 0);
+  const shares = Object.fromEntries(participants.map((id) => [id, Math.floor(totalCents * rolls[id] / sum)]));
+  const remainder = totalCents - Object.values(shares).reduce((n, cents) => n + cents, 0);
+  // 余分按最大余数分配，同余时按固定成员顺序，避免客户端调整顺序获利。
+  const ranked = [...participants].sort((a, b) => (totalCents * rolls[b]) % sum - (totalCents * rolls[a]) % sum);
+  for (let i = 0; i < remainder; i++) shares[ranked[i]]++;
+  return shares;
 }
 
 function balance(room) {
-  let p1 = TEMPORARY_MODE ? (room.repaymentCarryCents || 0) : 0;
-  for (const h of room.history) p1 += (h.payer === 'p1' ? h.amountCents : 0) - h.shares.p1;
-  for (const p of room.repayments) p1 += p.from === 'p1' ? p.amountCents : -p.amountCents;
-  return { p1, p2: -p1 };
+  const net = Object.fromEntries(memberIds(room).map((id) => [id, TEMPORARY_MODE ? room.repaymentCarry[id] || 0 : 0]));
+  for (const h of room.history) {
+    net[h.payer] += h.amountCents;
+    for (const [id, cents] of Object.entries(h.shares)) net[id] -= cents;
+  }
+  for (const p of room.repayments) {
+    net[p.from] += p.amountCents;
+    net[p.to] -= p.amountCents;
+  }
+  return net;
 }
 
-// ---------- 快照与广播 ----------
-// rolling 阶段不泄露对方点数（各自点数只通过 roll 动作的响应发给本人），
-// 双方都掷完后进入 result 才一起揭晓，保留开盲盒的悬念。
 function snapshot(room) {
-  const p1 = room.players.p1, p2 = room.players.p2;
   let bill = null;
   if (room.bill) {
     const b = room.bill;
     bill = {
       amountCents: b.amountCents, note: b.note, payer: b.payer,
-      faces: b.faces,
-      rerolls: b.rerolls,
-      pending: b.pending || null,
-      confirms: { p1: !!b.confirms.p1, p2: !!b.confirms.p2 },
-      rolled: { p1: b.rolls.p1 != null, p2: b.rolls.p2 != null },
+      participants: b.participants, required: b.required,
+      faces: b.faces, rerolls: b.rerolls, pending: b.pending || null,
+      confirms: b.confirms,
+      rolled: Object.fromEntries(b.participants.map((id) => [id, b.rolls[id] != null])),
     };
     if (room.phase === 'result') {
-      bill.rolls = { p1: b.rolls.p1, p2: b.rolls.p2 };
+      bill.rolls = b.rolls;
       bill.ratio = b.ratio;
       bill.shares = b.shares;
     }
   }
   return {
-    code: room.code,
+    code: room.code, capacity: room.capacity,
     temporaryMode: TEMPORARY_MODE,
-    version: room.version,
-    phase: room.phase,
-    faces: room.faces || 6,
-    players: {
-      p1: p1 ? { name: p1.name, avatar: p1.avatar, online: !!p1.online } : null,
-      p2: p2 ? { name: p2.name, avatar: p2.avatar, online: !!p2.online } : null,
-    },
-    bill,
-    history: room.history,
-    repayments: room.repayments,
-    ...(TEMPORARY_MODE ? { repaymentCarryCents: room.repaymentCarryCents || 0 } : {}),
-    ledgerPending: room.ledgerPending,
-    balance: balance(room),
+    version: room.version, phase: room.phase, faces: room.faces || 6,
+    players: Object.fromEntries(Object.entries(room.players).map(([id, p]) => [id,
+      p ? { name: p.name, avatar: p.avatar, online: !!p.online } : null])),
+    bill, history: room.history, repayments: room.repayments,
+    ...(TEMPORARY_MODE ? { repaymentCarry: room.repaymentCarry } : {}),
+    ledgerPending: room.ledgerPending, balance: balance(room),
   };
 }
 
 function broadcast(room) {
   const payload = 'data: ' + JSON.stringify(snapshot(room)) + '\n\n';
   const set = clients.get(room.code);
-  if (set) for (const res of set) { try { res.write(payload); } catch (e) { /* 连接已断 */ } }
+  if (set) for (const res of set) {
+    if (res.writableEnded || res.destroyed) continue;
+    if (roleOf(room, res._token) !== res._role) {
+      res.end('data: {"error":"stale"}\n\n');
+      continue;
+    }
+    res.write(payload);
+  }
 }
 
 function touch(room) {
@@ -271,11 +302,12 @@ function setOnline(code, role, delta) {
   if (TEMPORARY_MODE && delta > 0) {
     clearTimeout(initialConnectionTimers.get(code));
     initialConnectionTimers.delete(code);
+    delete room._recoveryUntil;
   }
   if (!!p.online !== online) {
     p.online = online;
     room.version += 1;
-    if (TEMPORARY_MODE && !room.players.p1.online && !room.players.p2?.online) {
+    if (TEMPORARY_MODE && !memberIds(room).some((id) => room.players[id].online) && !(room._recoveryUntil > Date.now())) {
       rooms.delete(code);
       return;
     }
@@ -284,31 +316,85 @@ function setOnline(code, role, delta) {
 }
 
 function roleOf(room, token) {
-  if (room.players.p1 && room.players.p1.token === token) return 'p1';
-  if (room.players.p2 && room.players.p2.token === token) return 'p2';
-  return null;
+  return memberIds(room).find((id) => room.players[id].token === token) || null;
 }
 
-// ---------- 动作处理 ----------
+function reserveConnection(room) {
+  clearTimeout(initialConnectionTimers.get(room.code));
+  const timer = setTimeout(() => {
+    initialConnectionTimers.delete(room.code);
+    const current = rooms.get(room.code);
+    if (current && !memberIds(current).some((id) => current.players[id].online)) rooms.delete(room.code);
+  }, ROOM_CONNECT_TIMEOUT_MS);
+  timer.unref();
+  initialConnectionTimers.set(room.code, timer);
+}
+
 function finishBill(room) {
   const b = room.bill;
-  const total = b.amountCents;
-  const { s1, s2 } = splitByRatio(total, b.rolls.p1, b.rolls.p2);
-  const g = (n, m) => (m ? g(m, n % m) : n);
-  const d = g(b.rolls.p1, b.rolls.p2);
-  b.ratio = [b.rolls.p1 / d, b.rolls.p2 / d];
-  b.shares = { p1: s1, p2: s2 };
+  b.shares = splitByRatio(b.amountCents, b.participants, b.rolls);
+  const gcd = (a, c) => c ? gcd(c, a % c) : a;
+  const divisor = b.participants.reduce((n, id) => gcd(n, b.rolls[id]), 0);
+  b.ratio = b.participants.map((id) => b.rolls[id] / divisor);
   room.phase = 'result';
 }
 
-// 重掷/作废都需要双方同意：第一次点击成为提议（bill.pending），
-// 对方用 respond 同意/拒绝，发起方可用 withdraw 撤回；对方点同样的动作视为同意。
 function doReroll(room) {
   const b = room.bill;
-  b.rolls = { p1: null, p2: null };
-  b.confirms = { p1: false, p2: false };
+  b.rolls = Object.fromEntries(b.participants.map((id) => [id, null]));
+  b.confirms = Object.fromEntries(b.required.map((id) => [id, false]));
+  delete b.shares;
+  delete b.ratio;
   b.rerolls += 1;
   room.phase = 'rolling';
+}
+
+function proposal(type, by, required) {
+  return { id: newToken(), type, by, required: [...required], approvals: { [by]: true } };
+}
+
+function approveProposal(pending, role) {
+  if (!pending.required.includes(role)) return '你不是这项操作的确认成员';
+  if (pending.approvals[role]) return '你已经确认过这项操作';
+  pending.approvals[role] = true;
+  return null;
+}
+
+function allApproved(pending) {
+  return pending.required.every((id) => pending.approvals[id]);
+}
+
+function applyBillProposal(room) {
+  const type = room.bill.pending.type;
+  room.bill.pending = null;
+  if (type === 'reroll') doReroll(room);
+  else { room.bill = null; room.phase = 'idle'; }
+}
+
+function applyLedgerProposal(room, pending) {
+  if (pending.type === 'deleteHistory') {
+    room.history = room.history.filter((h) => h.id !== pending.historyId);
+    if (TEMPORARY_MODE) { room.repayments = []; room.repaymentCarry = {}; }
+  } else if (pending.type === 'deleteRepayment') {
+    room.repayments = room.repayments.filter((p) => p.id !== pending.repaymentId);
+  } else if (pending.type === 'clearHistory') {
+    room.history = [];
+    room.repayments = [];
+    room.repaymentCarry = {};
+  } else if (pending.type === 'repay') {
+    if (TEMPORARY_MODE) {
+      // 旧明细被裁剪后仍需抵扣余额，否则还过的钱会重新成为欠款。
+      for (const p of room.repayments) {
+        room.repaymentCarry[p.from] = (room.repaymentCarry[p.from] || 0) + p.amountCents;
+        room.repaymentCarry[p.to] = (room.repaymentCarry[p.to] || 0) - p.amountCents;
+      }
+      room.repayments = [];
+    }
+    room.repayments.unshift({
+      id: pending.id, ts: Date.now(), amountCents: pending.amountCents,
+      from: pending.from, to: pending.to,
+    });
+  }
 }
 
 function handleAction(room, role, body) {
@@ -325,29 +411,38 @@ function handleAction(room, role, body) {
     }
     case 'start': {
       if (room.phase !== 'idle') return '当前状态不能开新的一笔';
-      if (!room.players.p2) return '对方还没加入房间';
       if (room.ledgerPending) return '先处理待确认的账本操作';
       if (!TEMPORARY_MODE && room.history.length >= MAX_HISTORY) return `账本已满（${MAX_HISTORY} 条），先删几条旧账再记`;
-      const cents = Math.round(Number(body.amountCents));
-      if (!Number.isFinite(cents) || cents < 1 || cents > 1000000000) return '金额不合法';
+      const cents = body.amountCents;
+      if (!Number.isSafeInteger(cents) || cents < 1 || cents > 1000000000) return '金额不合法';
+      const ids = memberIds(room);
+      const selected = body.participants === undefined ? ids : body.participants;
+      if (!Array.isArray(selected) || selected.length < 2 || selected.length > ids.length ||
+          new Set(selected).size !== selected.length || !selected.every((id) => ids.includes(id))) return '请选择至少两位有效且不重复的参与成员';
+      const participants = ids.filter((id) => selected.includes(id));
+      if (!participants.includes(role)) return '只能为自己参与的分账开账';
+      const payer = body.payer === undefined ? role : body.payer;
+      if (!participants.includes(payer)) return '垫付人必须参与本笔分账';
+      const required = TEMPORARY_MODE ? ids : participants;
       room.bill = {
         amountCents: cents,
         note: String(body.note || '').trim().slice(0, 30),
-        payer: body.payer === 'p2' ? 'p2' : 'p1',
-        faces: room.faces || 6, // 开账时锁定面数，中途不可换
-        rolls: { p1: null, p2: null },
+        payer, participants, required,
+        faces: room.faces || 6,
+        rolls: Object.fromEntries(participants.map((id) => [id, null])),
         rerolls: 0,
-        confirms: { p1: false, p2: false },
+        confirms: Object.fromEntries(required.map((id) => [id, false])),
       };
       room.phase = 'rolling';
       break;
     }
     case 'roll': {
       if (room.phase !== 'rolling') return '当前不能掷骰';
-      if (bill.pending) return '对方提议作废这笔，先回应一下';
+      if (!bill.participants.includes(role)) return '你没有参与本笔分账';
+      if (bill.pending) return '有作废提议待处理，请先回应';
       if (bill.rolls[role] != null) return '你已经掷过了';
       bill.rolls[role] = rollDie(bill.faces);
-      if (bill.rolls.p1 != null && bill.rolls.p2 != null) finishBill(room);
+      if (bill.participants.every((id) => bill.rolls[id] != null)) finishBill(room);
       break;
     }
     case 'setFaces': {
@@ -357,78 +452,54 @@ function handleAction(room, role, body) {
       if (room.faces !== f) room.faces = f;
       break;
     }
-    case 'reroll': {
-      if (room.phase !== 'result') return '当前不能重掷';
+    case 'reroll':
+    case 'void': {
+      if (t === 'reroll' && room.phase !== 'result') return '当前不能重掷';
+      if (!bill || (room.phase !== 'rolling' && room.phase !== 'result')) return '没有进行中的账';
+      if (!bill.required.includes(role)) return '你不是本笔分账的确认成员';
       if (bill.pending || body.proposalId !== undefined) {
         if (!bill.pending || bill.pending.id !== body.proposalId) return '提议已变化，请查看最新分账';
-        if (bill.pending.by === role) return '你已提议重掷，等对方回应';
-        if (bill.pending.type !== 'reroll') return '对方提议的是作废，先回应那个';
-        bill.pending = null;
-        doReroll(room);
-        break;
+        if (bill.pending.type !== t) return '请先回应当前提议';
+        const err = approveProposal(bill.pending, role);
+        if (err) return err;
+        if (allApproved(bill.pending)) applyBillProposal(room);
+      } else {
+        bill.pending = proposal(t, role, bill.required);
       }
-      bill.pending = { id: newToken(), type: 'reroll', by: role };
       break;
     }
     case 'confirm': {
       if (room.phase !== 'result') return '当前不能确认';
-      if (bill.pending) return '对方有重掷/作废提议待回应，先处理一下';
+      if (!bill.required.includes(role)) return '你不是本笔分账的确认成员';
+      if (bill.pending) return '有重掷或作废提议待回应，请先处理';
+      if (bill.confirms[role]) return '你已经确认过本笔分账';
       bill.confirms[role] = true;
-      if (bill.confirms.p1 && bill.confirms.p2) {
-        // 容量兜底（正常已被 start 前置拦截）：回滚确认并作废这笔，避免卡死在 result
-        if (!TEMPORARY_MODE && room.history.length >= MAX_HISTORY) {
-          bill.confirms = { p1: false, p2: false };
-          room.bill = null;
-          room.phase = 'idle';
-          touch(room); // 此分支改了状态，需广播给双方
-          return `账本已满（${MAX_HISTORY} 条），这笔没法入账，先删几条旧账吧`;
-        }
+      if (bill.required.every((id) => bill.confirms[id])) {
+        if (!TEMPORARY_MODE && room.history.length >= MAX_HISTORY) return `账本已满（${MAX_HISTORY} 条），请先清理旧账`;
         room.history.unshift({
-          id: newToken().slice(0, 8),
-          ts: Date.now(),
-          amountCents: bill.amountCents,
-          note: bill.note,
-          payer: bill.payer,
-          faces: bill.faces,
-          rolls: bill.rolls,
-          ratio: bill.ratio,
-          shares: bill.shares,
-          rerolls: bill.rerolls,
+          id: newToken(), ts: Date.now(), amountCents: bill.amountCents,
+          note: bill.note, payer: bill.payer, participants: bill.participants,
+          faces: bill.faces, rolls: bill.rolls, ratio: bill.ratio,
+          shares: bill.shares, rerolls: bill.rerolls,
         });
         if (TEMPORARY_MODE) {
           room.history = room.history.slice(0, 1);
           room.repayments = [];
-          room.repaymentCarryCents = 0;
+          room.repaymentCarry = {};
         }
         room.bill = null;
         room.phase = 'idle';
       }
       break;
     }
-    case 'void': {
-      if (room.phase !== 'rolling' && room.phase !== 'result') return '没有进行中的账';
-      if (bill.pending || body.proposalId !== undefined) {
-        if (!bill.pending || bill.pending.id !== body.proposalId) return '提议已变化，请查看最新分账';
-        if (bill.pending.by === role) return '你已提议过，等对方回应';
-        if (bill.pending.type !== 'void') return '对方提议的是重掷，先回应那个';
-        bill.pending = null;
-        room.bill = null;
-        room.phase = 'idle';
-        break;
-      }
-      bill.pending = { id: newToken(), type: 'void', by: role };
-      break;
-    }
     case 'respond': {
-      if (!bill?.pending || bill.pending.id !== body.proposalId) return '提议已变化，请查看最新分账';
-      if (bill.pending.by === role) return '这是你自己的提议，等对方回应';
+      const pending = bill?.pending;
+      if (!pending || pending.id !== body.proposalId) return '提议已变化，请查看最新分账';
       if (typeof body.approve !== 'boolean') return '请选择同意或不同意';
-      const type = bill.pending.type;
-      bill.pending = null;
-      if (body.approve) {
-        if (type === 'reroll') doReroll(room);
-        else { room.bill = null; room.phase = 'idle'; }
-      }
+      const err = approveProposal(pending, role);
+      if (err) return err;
+      if (!body.approve) bill.pending = null;
+      else if (allApproved(pending)) applyBillProposal(room);
       break;
     }
     case 'withdraw': {
@@ -442,62 +513,46 @@ function handleAction(room, role, body) {
     case 'clearHistory':
     case 'repay': {
       if (room.phase !== 'idle') return '先完成当前这一笔，再管理账本';
-      if (room.ledgerPending) return '已有账本操作等待双方确认';
-      const pending = { id: newToken(), type: t, by: role };
+      if (room.ledgerPending) return '已有账本操作等待确认';
+      const ids = memberIds(room);
+      const pending = proposal(t, role, ids);
       if (t === 'deleteHistory') {
         if (!room.history.some((h) => h.id === body.id)) return '没有找到这条记录';
         pending.historyId = body.id;
       } else if (t === 'deleteRepayment') {
-        if (!room.repayments.some((p) => p.id === body.id)) return '没有找到这条还款记录';
+        const repayment = room.repayments.find((p) => p.id === body.id);
+        if (!repayment) return '没有找到这条还款记录';
         pending.repaymentId = body.id;
+        pending.required = [repayment.from, repayment.to];
       } else if (t === 'clearHistory') {
-        if (!room.history.length && !room.repayments.length && !room.repaymentCarryCents) return '账本已经是空的';
+        if (!room.history.length && !room.repayments.length && !Object.values(room.repaymentCarry).some(Boolean)) return '账本已经是空的';
       } else {
-        const net = balance(room).p1;
-        if (net === 0) return '目前已两清，无需还款';
-        const cents = body.amountCents;
-        if (!Number.isSafeInteger(cents) || cents < 1 || cents > Math.abs(net)) return '还款金额须大于零且不超过当前欠款';
-        if (!TEMPORARY_MODE && room.repayments.length >= MAX_HISTORY) return '还款记录已满，请先双方确认清理旧记录';
+        const { from, to, amountCents: cents } = body;
+        if (from === to || !ids.includes(from) || !ids.includes(to)) return '请选择有效的付款和收款成员';
+        const net = balance(room);
+        if (net[from] >= 0 || net[to] <= 0) return '付款人须有待还余额，收款人须有应收余额';
+        if (!Number.isSafeInteger(cents) || cents < 1 || cents > 1000000000 || cents > Math.min(-net[from], net[to])) return '还款金额须大于零且不超过双方可结算金额及一千万元';
+        if (!TEMPORARY_MODE && room.repayments.length >= MAX_HISTORY) return '还款记录已满，请先确认清理旧记录';
         pending.amountCents = cents;
-        pending.from = net < 0 ? 'p1' : 'p2';
-        pending.to = net < 0 ? 'p2' : 'p1';
+        pending.from = from;
+        pending.to = to;
+        pending.required = [from, to];
       }
+      if (!pending.required.includes(role)) return '只能管理与自己有关的还款';
       room.ledgerPending = pending;
       break;
     }
     case 'ledgerRespond': {
       const pending = room.ledgerPending;
       if (!pending || pending.id !== body.proposalId) return '提议已变化，请查看最新账本';
-      if (pending.by === role) return '需要另一人确认这项操作';
       if (typeof body.approve !== 'boolean') return '请选择同意或不同意';
-      if (body.approve) {
-        if (pending.type === 'deleteHistory') {
-          room.history = room.history.filter((h) => h.id !== pending.historyId);
-          if (TEMPORARY_MODE) {
-            room.repayments = [];
-            room.repaymentCarryCents = 0;
-          }
-        } else if (pending.type === 'deleteRepayment') {
-          room.repayments = room.repayments.filter((p) => p.id !== pending.repaymentId);
-        } else if (pending.type === 'clearHistory') {
-          room.history = [];
-          room.repayments = [];
-          if (TEMPORARY_MODE) room.repaymentCarryCents = 0;
-        } else if (pending.type === 'repay') {
-          if (TEMPORARY_MODE) {
-            // 丢弃旧明细，但已确认的还款不能因此重新变成欠款。
-            for (const p of room.repayments) {
-              room.repaymentCarryCents = (room.repaymentCarryCents || 0) + (p.from === 'p1' ? p.amountCents : -p.amountCents);
-            }
-            room.repayments = [];
-          }
-          room.repayments.unshift({
-            id: pending.id, ts: Date.now(), amountCents: pending.amountCents,
-            from: pending.from, to: pending.to,
-          });
-        }
+      const err = approveProposal(pending, role);
+      if (err) return err;
+      if (!body.approve) room.ledgerPending = null;
+      else if (allApproved(pending)) {
+        applyLedgerProposal(room, pending);
+        room.ledgerPending = null;
       }
-      room.ledgerPending = null;
       break;
     }
     case 'ledgerWithdraw': {
@@ -536,25 +591,31 @@ function readBody(req) {
   });
 }
 
-function makeRoom(name, avatar) {
-  const code = newCode();
-  const token = newToken();
-  const room = {
-    code,
-    version: 0,
-    createdAt: Date.now(),
-    phase: 'lobby',
-    faces: 6,
-    players: {
-      p1: { name, avatar, token, online: false, _conns: 0 },
-      p2: null,
-    },
-    bill: null,
-    history: [],
-    repayments: [],
-    ledgerPending: null,
+function recoveryHash(code) {
+  return crypto.createHash('sha256').update(String(code).replace(/[-\s]/g, '').toUpperCase()).digest('hex');
+}
+
+function newRecoveryCode() {
+  return newToken().toUpperCase().match(/.{8}/g).join('-');
+}
+
+function makePlayer(name, avatar) {
+  const recoveryCode = newRecoveryCode();
+  return {
+    player: { name, avatar, token: newToken(), recoveryHash: recoveryHash(recoveryCode), online: false, _conns: 0 },
+    recoveryCode,
   };
-  return { room, token };
+}
+
+function makeRoom(name, avatar, capacity) {
+  const { player, recoveryCode } = makePlayer(name, avatar);
+  const room = {
+    code: newCode(), capacity,
+    version: 0, createdAt: Date.now(), phase: 'lobby', faces: 6,
+    players: { p1: player, p2: null },
+    bill: null, history: [], repayments: [], repaymentCarry: {}, ledgerPending: null,
+  };
+  return { room, token: player.token, recoveryCode };
 }
 
 const server = http.createServer(async (req, res) => {
@@ -562,6 +623,7 @@ const server = http.createServer(async (req, res) => {
   const pathName = url.pathname;
 
   res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('Cache-Control', 'no-store');
 
   // 统一限速：掐死房间码枚举与接口滥用
   if (!rateLimit(clientIp(req))) {
@@ -607,6 +669,8 @@ const server = http.createServer(async (req, res) => {
 
       let set = clients.get(room.code);
       if (!set) { set = new Set(); clients.set(room.code, set); }
+      res._role = role;
+      res._token = url.searchParams.get('token');
       set.add(res);
       setOnline(room.code, role, +1);
 
@@ -635,54 +699,69 @@ const server = http.createServer(async (req, res) => {
       const body = await readBody(req);
       if (!passOk(body.passcode, req)) { needPass(res); return; }
       if (rooms.size >= MAX_ROOMS) { json(res, 403, { error: '房间数已达上限，联系服务器主人清理' }); return; }
-      const { room, token } = makeRoom(
+      const capacity = body.capacity === undefined ? 2 : body.capacity;
+      if (!Number.isInteger(capacity) || capacity < 2 || capacity > 8) {
+        json(res, 400, { error: '房间人数须为 2～8 人' }); return;
+      }
+      const { room, token, recoveryCode } = makeRoom(
         sanitizeName(body.name, '玩家1'),
-        sanitizeAvatar(body.avatar, '🐻')
+        sanitizeAvatar(body.avatar, '🐻'), capacity
       );
       touch(room);
-      if (TEMPORARY_MODE) {
-        // 建房响应之后浏览器才能连接 SSE，未连接的预留房间不能永久占用容量。
-        const timer = setTimeout(() => {
-          initialConnectionTimers.delete(room.code);
-          if (!clients.has(room.code)) rooms.delete(room.code);
-        }, ROOM_CONNECT_TIMEOUT_MS);
-        timer.unref();
-        initialConnectionTimers.set(room.code, timer);
-      }
-      json(res, 200, { code: room.code, token, role: 'p1' });
+      if (TEMPORARY_MODE) reserveConnection(room);
+      json(res, 200, { code: room.code, token, role: 'p1', recoveryCode });
       return;
     }
 
-    // 加入（含换机认领）
     if (req.method === 'POST' && pathName === '/api/join') {
       const body = await readBody(req);
       if (!passOk(body.passcode, req)) { needPass(res); return; }
+      if (body.claimRole !== undefined) { json(res, 403, { error: '不能凭房间号认领身份，请使用个人恢复码' }); return; }
       const current = rooms.get(String(body.code || '').trim().toUpperCase());
       if (!current) { json(res, 404, { error: '房间不存在，检查一下房间码' }); return; }
       const room = structuredClone(current);
-      if (room.players.p2) {
-        // 房间已满：支持凭房间码认领身份（换手机场景，前端有二次确认）
-        if (body.claimRole === 'p1' || body.claimRole === 'p2') {
-          const role = body.claimRole;
-          const token = newToken();
-          room.players[role].token = token;
-          if (body.name) room.players[role].name = sanitizeName(body.name, room.players[role].name);
-          touch(room);
-          json(res, 200, { code: room.code, token, role });
-        } else {
-          json(res, 409, { error: 'full' });
-        }
-        return;
-      }
-      const token = newToken();
-      room.players.p2 = {
-        name: sanitizeName(body.name, '玩家2'),
-        avatar: sanitizeAvatar(body.avatar, '🐱'),
-        token, online: false, _conns: 0,
-      };
-      room.phase = 'idle';
+      const count = memberIds(room).length;
+      if (count >= room.capacity) { json(res, 409, { error: 'full' }); return; }
+      const role = `p${count + 1}`;
+      const { player, recoveryCode } = makePlayer(
+        sanitizeName(body.name, `玩家${count + 1}`), sanitizeAvatar(body.avatar, '🐱')
+      );
+      room.players[role] = player;
+      if (room.phase === 'lobby') room.phase = 'idle';
       touch(room);
-      json(res, 200, { code: room.code, token, role: 'p2' });
+      json(res, 200, { code: room.code, token: player.token, role, recoveryCode });
+      return;
+    }
+
+    if (req.method === 'POST' && pathName === '/api/recover') {
+      const body = await readBody(req);
+      if (!passOk(body.passcode, req)) { needPass(res); return; }
+      const current = rooms.get(String(body.code || '').trim().toUpperCase());
+      const hash = recoveryHash(body.recoveryCode || '');
+      const role = current && memberIds(current).find((id) => current.players[id].recoveryHash === hash);
+      if (!role) { json(res, 401, { error: '房间号或个人恢复码不正确' }); return; }
+      const room = structuredClone(current);
+      const token = newToken();
+      room.players[role].token = token;
+      // 换机先关闭旧连接，新设备拿到响应再重连，需要短暂保留临时房间。
+      if (TEMPORARY_MODE) room._recoveryUntil = Date.now() + ROOM_CONNECT_TIMEOUT_MS;
+      touch(room);
+      if (TEMPORARY_MODE) reserveConnection(room);
+      json(res, 200, { code: room.code, token, role, recoveryCode: String(body.recoveryCode).replace(/[-\s]/g, '').toUpperCase().match(/.{8}/g).join('-') });
+      return;
+    }
+
+    if (req.method === 'POST' && pathName === '/api/recovery') {
+      const body = await readBody(req);
+      if (!passOk(body.passcode, req)) { needPass(res); return; }
+      const current = rooms.get(String(body.code || '').trim().toUpperCase());
+      const role = current && roleOf(current, body.token || '');
+      if (!role) { json(res, 401, { error: 'stale' }); return; }
+      const room = structuredClone(current);
+      const recoveryCode = newRecoveryCode();
+      room.players[role].recoveryHash = recoveryHash(recoveryCode);
+      touch(room);
+      json(res, 200, { recoveryCode });
       return;
     }
 

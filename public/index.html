@@ -2,7 +2,7 @@
 <html lang="zh-CN">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
 <meta name="theme-color" content="#FF6B6B">
@@ -181,12 +181,81 @@
 
   .fadein { animation: fadein .25s ease; }
   @keyframes fadein { from { opacity: 0; transform: translateY(8px); } }
+
+  #app.room-view { max-width: 800px; }
+  :root { --sub: #796B5D; }
+  button, input, select, summary { touch-action: manipulation; }
+  button:focus-visible, input:focus-visible, select:focus-visible, summary:focus-visible {
+    outline: 3px solid var(--mint); outline-offset: 3px;
+  }
+  button:disabled { cursor: not-allowed; }
+  select { width: 100%; min-height: 48px; padding: 12px; border: 2px solid var(--line); border-radius: 14px;
+    background: #FFFDF9; color: var(--ink); font: inherit; }
+  .roomcard { display: block; }
+  .room-heading { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; }
+  .room-heading .hint { text-align: left; margin-top: 4px; }
+  .players { display: grid; grid-template-columns: repeat(auto-fit, minmax(72px, 1fr)); gap: 10px; margin-top: 18px; }
+  .player { min-width: 0; padding: 10px 4px; background: #FFF9F1; border-radius: 14px; }
+  .player .name { max-width: none; white-space: normal; overflow-wrap: anywhere; color: var(--ink); }
+  .player .status { margin-top: 4px; font-size: 11px; color: var(--sub); }
+  .player .face { display: inline-block; }
+  .dicezone, .shares, .member-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 10px; }
+  .diebox { max-width: none; min-width: 0; }
+  .who, .billhead .note, .confirmline, .hint { overflow-wrap: anywhere; line-height: 1.65; }
+  .shares > div { min-width: 0; }
+  .shares .m { font-size: 21px; font-variant-numeric: tabular-nums; }
+  .ratio { font-size: 20px; overflow-wrap: anywhere; }
+  .stats { flex-wrap: wrap; gap: 14px 8px; }
+  .stats > div { min-width: 100px; }
+  .member-stats { margin-top: 14px; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); }
+  .member-stat { border: 1px solid var(--line); border-radius: 16px; padding: 14px; background: #FFFDF9; min-width: 0; }
+  .member-stat h3 { font-size: 14px; overflow-wrap: anywhere; }
+  .member-stat dl { margin-top: 10px; font-size: 13px; }
+  .member-stat dl > div { display: flex; justify-content: space-between; gap: 10px; margin-top: 7px; }
+  .member-stat dt { color: var(--sub); }
+  .member-stat dd { text-align: right; font-variant-numeric: tabular-nums; }
+  .member-stat .net { padding-top: 9px; border-top: 1px dashed var(--line); font-weight: 700; }
+  .in { color: #178574; } .out { color: #C34747; }
+  .recovery-reminder { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px;
+    margin-top: 16px; padding: 12px 16px; border: 1px solid #EDC498; border-radius: 14px; background: #FFF3DF; }
+  .recovery-reminder p { font-size: 12px; line-height: 1.6; flex: 1; min-width: 180px; }
+  .recovery-code { font-family: ui-monospace, monospace; font-size: 15px !important; letter-spacing: 1px; }
+  .button-row { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+  .button-row .btn { flex: 1; margin: 0; min-width: 110px; }
+  .history-card { padding: 0; overflow: hidden; }
+  .history-card .hitem { flex-wrap: wrap; }
+  .history-card details { padding: 0 14px 14px; }
+  summary { cursor: pointer; color: var(--sub); font-size: 13px; padding: 8px 0; }
+  .history-card .shares { margin-top: 5px; }
+  .history-card .shares .m { font-size: 16px; }
+  .history-card .dice { margin-top: 5px; }
+  fieldset { border: 0; margin-top: 16px; min-width: 0; }
+  legend { color: var(--sub); font-size: 13px; font-weight: 600; margin-bottom: 8px; }
+  .participant-picker { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+  .participant-picker label { display: flex; align-items: center; gap: 8px; margin: 0; padding: 12px 10px;
+    background: #fff; border: 2px solid var(--line); border-radius: 14px; color: var(--ink); overflow-wrap: anywhere; }
+  .participant-picker label:has(input:checked) { border-color: var(--brand); background: #FFF3EC; }
+  input[type=checkbox] { width: 18px; height: 18px; flex-shrink: 0; accent-color: var(--brand); }
+  .sheet { max-width: 520px; }
+  .sheet h4 { margin-top: 20px; font-size: 15px; }
+  .progress { margin-top: 12px; font-size: 13px; line-height: 1.7; color: var(--sub); overflow-wrap: anywhere; }
+  .progress strong { color: var(--ink); }
+  .die.waiting { display: grid; place-items: center; font-size: 24px; }
+  @media (max-width: 360px) {
+    .card { padding: 16px; }
+    .dicezone, .shares { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .history-card { padding: 0; }
+    .topbar .title { font-size: 18px; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after { animation: none !important; transition: none !important; }
+  }
 </style>
 </head>
 <body>
-<div id="app"></div>
+<main id="app"></main>
 <div id="modal-root"></div>
-<div id="toast"></div>
+<div id="toast" role="status" aria-live="polite"></div>
 
 <script>
 'use strict';
@@ -200,8 +269,8 @@ function temporaryNotice() {
   return temporaryMode ? `<aside class="temporary-notice" role="note" aria-label="无密码临时模式提示">
     <strong>目前未设置密码 · 临时模式</strong>
     房间内容仅在内存中，不保存到磁盘。最后一人断开或服务重启后，房间及全部记录立即销毁。<br>
-    分账仅留最近一笔，新分账替换旧分账及其还款；还款明细只留最新一条，当前分账已还金额仍累计。<br>
-    独自刷新或关闭页面也可能销毁房间。公网使用仍建议设置密码。
+    分账仅留最近一笔，新分账经开掷时所有成员确认后替换旧分账及其还款；还款明细只留最新一条，省略明细按每位成员的还款净额保留。<br>
+    独自刷新或关闭页面也可能销毁房间；已销毁的房间无法用恢复码找回。公网使用仍建议设置密码。
   </aside>` : '';
 }
 
@@ -353,118 +422,154 @@ function leaveRoom(msg) {
 
 /* ============ 首页 ============ */
 let homeTab = 'create';
-let homeForm = { name: '', avatar: '🐻', code: '' };
+let homeForm = { name: '', avatar: AVATARS[0], code: '', capacity: 2, recoveryCode: '' };
+let homeBusy = false;
 
 function renderHome() {
   if (window.__presetCode) { homeForm.code = window.__presetCode; homeTab = 'join'; }
-  const f = homeForm;
+  window.__presetCode = null;
+  const f = homeForm, restoring = homeTab === 'restore';
+  $app.classList.remove('room-view');
   $app.innerHTML = `
     <div class="logo fadein">
-      <span class="big">🎲</span>
+      <span class="big" aria-hidden="true">⚄</span>
       <h1>骰子分账</h1>
-      <p>谁多付一点？让骰子说了算</p>
+      <p>两到八个人，多少交给骰子</p>
     </div>
     ${temporaryNotice()}
     <div class="card fadein">
-      <div class="tabs">
-        <button class="${homeTab === 'create' ? 'on' : ''}" data-tab="create">开个房间</button>
-        <button class="${homeTab === 'join' ? 'on' : ''}" data-tab="join">加入房间</button>
+      <div class="tabs" aria-label="进入房间的方式">
+        ${[['create', '开个房间'], ['join', '加入房间'], ['restore', '恢复身份']].map(([tab, text]) => `
+          <button class="${homeTab === tab ? 'on' : ''}" data-tab="${tab}" aria-pressed="${homeTab === tab}" ${homeBusy ? 'disabled' : ''}>${text}</button>`).join('')}
       </div>
-      <label>我的昵称</label>
-      <input type="text" id="f-name" maxlength="12" placeholder="怎么称呼你？" value="${esc(f.name)}">
-      <label>选个头像</label>
-      <div class="avatars">${AVATARS.map((a) =>
-        `<button data-av="${a}" class="${f.avatar === a ? 'on' : ''}">${a}</button>`).join('')}</div>
-      ${homeTab === 'join' ? `
-        <label>房间码</label>
-        <input type="text" id="f-code" maxlength="5" placeholder="对方告诉你的 5 位码" value="${esc(f.code)}"
-          style="text-transform:uppercase; letter-spacing:5px; font-weight:800; text-align:center;">` : ''}
-      <button class="btn" id="f-go">${homeTab === 'create' ? '🎲 开个房间' : '🚪 加入房间'}</button>
-      <p style="text-align:center;color:var(--sub);font-size:12px;margin-top:12px;">
-        只记账，不碰钱 · ${temporaryMode ? '临时记录，不保存到磁盘' : '记录存在你们自己的电脑/服务器上'}</p>
+      ${restoring ? '<p class="hint">使用你自己保存的恢复码，回到原成员身份。昵称不变，旧设备的登录会失效。</p>' : `
+        <label for="f-name">我的昵称</label>
+        <input type="text" id="f-name" maxlength="12" placeholder="怎么称呼你？" autocomplete="nickname" value="${esc(f.name)}">
+        <fieldset><legend>选个头像</legend>
+          <div class="avatars">${AVATARS.map((a, i) =>
+            `<button data-av="${esc(a)}" aria-label="头像 ${i + 1}" aria-pressed="${f.avatar === a}" class="${f.avatar === a ? 'on' : ''}">${esc(a)}</button>`).join('')}</div>
+        </fieldset>`}
+      ${homeTab === 'create' ? `
+        <label for="f-capacity">房间人数上限</label>
+        <select id="f-capacity">${[2,3,4,5,6,7,8].map((n) => `<option value="${n}" ${f.capacity === n ? 'selected' : ''}>${n} 人</option>`).join('')}</select>
+        <p class="hint">至少两人加入就能开掷，不用等房间坐满。</p>` : `
+        <label for="f-code">房间码</label>
+        <input type="text" id="f-code" maxlength="5" placeholder="5 位房间码" value="${esc(f.code)}" autocapitalize="characters" spellcheck="false"
+          style="text-transform:uppercase; letter-spacing:5px; font-weight:800; text-align:center;">`}
+      ${restoring ? `
+        <label for="f-recovery">我的恢复码</label>
+        <input type="text" id="f-recovery" class="recovery-code" value="${esc(f.recoveryCode)}" autocomplete="off" autocapitalize="none" spellcheck="false" placeholder="输入之前保存的个人恢复码">
+        <p class="hint">无需昵称，也不能选择或接管别人的身份。临时房间销毁后，即使有恢复码也无法找回。</p>` : ''}
+      <button class="btn" id="f-go" ${homeBusy ? 'disabled' : ''}>${homeBusy ? '正在连接…' : restoring ? '恢复我的身份' : homeTab === 'create' ? '开个房间' : '加入房间'}</button>
+      <p class="hint">只记账，不碰钱 · ${temporaryMode ? '临时记录，不保存到磁盘' : '记录存在你们自己的电脑/服务器上'}</p>
     </div>`;
 
-  $app.querySelector('#f-name').addEventListener('input', (e) => { homeForm.name = e.target.value; });
-  const codeEl = $app.querySelector('#f-code');
-  if (codeEl) codeEl.addEventListener('input', (e) => { homeForm.code = e.target.value.toUpperCase(); });
+  $app.querySelector('#f-name')?.addEventListener('input', (e) => { homeForm.name = e.target.value; });
+  $app.querySelector('#f-code')?.addEventListener('input', (e) => { homeForm.code = e.target.value.toUpperCase(); });
+  $app.querySelector('#f-capacity')?.addEventListener('change', (e) => { homeForm.capacity = Number(e.target.value); });
+  $app.querySelector('#f-recovery')?.addEventListener('input', (e) => { homeForm.recoveryCode = e.target.value; });
   $app.querySelectorAll('.avatars button').forEach((b) => b.addEventListener('click', () => {
-    homeForm.avatar = b.dataset.av; renderHome();
+    homeForm.avatar = b.dataset.av;
+    $app.querySelectorAll('.avatars button').forEach((x) => {
+      x.classList.toggle('on', x === b); x.setAttribute('aria-pressed', String(x === b));
+    });
   }));
   $app.querySelectorAll('.tabs button').forEach((b) => b.addEventListener('click', () => {
     homeTab = b.dataset.tab; renderHome();
+    $app.querySelector(`[data-tab="${homeTab}"]`).focus();
   }));
   $app.querySelector('#f-go').addEventListener('click', async () => {
-    const name = homeForm.name.trim() || (homeTab === 'create' ? '玩家1' : '玩家2');
+    if (homeBusy) return;
+    const tab = homeTab, code = homeForm.code.trim().toUpperCase();
+    if (tab !== 'create' && !code) { toast('请填写房间码'); document.getElementById('f-code').focus(); return; }
+    if (tab === 'restore' && !homeForm.recoveryCode.trim()) { toast('请填写自己的恢复码'); document.getElementById('f-recovery').focus(); return; }
+    const name = homeForm.name.trim() || '玩家';
+    homeBusy = true; renderHome();
     try {
-      const d = homeTab === 'create'
-        ? await api('/api/create', { name, avatar: homeForm.avatar })
-        : await api('/api/join', { name, avatar: homeForm.avatar, code: homeForm.code.trim() });
-      me = d; saveMe(); connect();
+      const d = tab === 'create'
+        ? await api('/api/create', { name, avatar: homeForm.avatar, capacity: homeForm.capacity })
+        : tab === 'restore'
+          ? await api('/api/recover', { code, recoveryCode: homeForm.recoveryCode.trim() })
+          : await api('/api/join', { name, avatar: homeForm.avatar, code });
+      me = { code: d.code || code, token: d.token, role: d.role, recoveryCode: d.recoveryCode };
+      homeForm.recoveryCode = '';
+      saveMe(); connect(); render();
     } catch (e) {
-      if (e.message === 'full') openClaimSheet(); else toast(e.message);
+      toast(e.message === 'full' ? '房间已满。已有身份请使用「恢复身份」和自己的恢复码。' : e.message);
+    } finally {
+      homeBusy = false;
+      if (!me) renderHome();
     }
   });
-  window.__presetCode = null;
-}
-
-// 房间已满：换手机/接管身份的认领入口
-function openClaimSheet() {
-  $modal.innerHTML = `
-    <div class="mask" id="mask">
-      <div class="sheet">
-        <h3>这个房间已经有两个人啦</h3>
-        <p style="text-align:center;color:var(--sub);font-size:13px;line-height:1.7;margin-top:6px">
-          如果是你换手机（或其中一台设备不用了），<br>可以认领对应身份，认领后旧设备会自动退出。</p>
-        <button class="btn" id="c-p1">认领 P1（${esc(roomP1Name())}）</button>
-        <button class="btn" id="c-p2" style="margin-top:10px">认领 P2（${esc(roomP2Name())}）</button>
-        <button class="btn plain" id="c-cancel" style="margin-top:10px">点错了，取消</button>
-      </div>
-    </div>`;
-  const doClaim = async (role) => {
-    try {
-      const d = await api('/api/join', {
-        name: homeForm.name.trim() || undefined, avatar: homeForm.avatar,
-        code: homeForm.code.trim(), claimRole: role,
-      });
-      me = d; saveMe(); connect();
-      $modal.innerHTML = '';
-    } catch (e) { toast(e.message); }
-  };
-  document.getElementById('c-p1').addEventListener('click', () => doClaim('p1'));
-  document.getElementById('c-p2').addEventListener('click', () => doClaim('p2'));
-  document.getElementById('c-cancel').addEventListener('click', () => { $modal.innerHTML = ''; });
-  document.getElementById('mask').addEventListener('click', (e) => { if (e.target.id === 'mask') $modal.innerHTML = ''; });
-}
-function roomP1Name() {
-  const code = homeForm.code.trim();
-  const known = room && room.code === code ? room.players.p1 : null;
-  return known ? known.avatar + ' ' + known.name : '原房主';
-}
-function roomP2Name() {
-  const code = homeForm.code.trim();
-  const known = room && room.code === code ? room.players.p2 : null;
-  return known ? known.avatar + ' ' + known.name : '另一位';
 }
 
 /* ============ 房间页 ============ */
 function myRole() { return me && me.role; }
-function otherRole() { return me.role === 'p1' ? 'p2' : 'p1'; }
-function ph(p) { return p ? p.avatar + ' ' + esc(p.name) : '待加入'; }
-// 1–6 点用骰面字符，更多点数（8/12/20 面骰）用数字骰面
-function dieGlyph(n) { return n <= 6 ? '⚀⚁⚂⚃⚄⚅'[n - 1] : `<span class="dnum">${n}</span>`; }
+function memberIds() { return Object.keys(room.players).filter((id) => room.players[id]); }
+function ph(p, id = '') { return p ? `${esc(p.avatar)} ${esc(p.name)}` : esc(id || '待加入'); }
+function memberName(id) { return room.players[id]?.name || id; }
+function names(ids) { return ids.map((id) => esc(memberName(id))).join('、'); }
+function participantsOf(record) { return record.participants || Object.keys(record.shares || {}); }
+function ledgerBusy() { return room.phase !== 'idle' || !!room.bill || !!room.ledgerPending; }
+// 1–6 点用骰面字符，更多点数用数字骰面；旁观者没有点数。
+function dieGlyph(n) {
+  if (!Number.isInteger(n) || n < 1) return '—';
+  return n <= 6 ? '⚀⚁⚂⚃⚄⚅'[n - 1] : `<span class="dnum">${esc(n)}</span>`;
+}
+function netText(net) { return net > 0 ? `应收 ¥ ${fmt(net)}` : net < 0 ? `应付 ¥ ${fmt(-net)}` : '已两清'; }
+function repaidText(net) { return net > 0 ? `净还出 ¥ ${fmt(net)}` : net < 0 ? `净收回 ¥ ${fmt(-net)}` : '¥ 0.00'; }
+function luckText(st) {
+  return !st.n ? '尚未参与' : Math.abs(st.luck) < 0.005 ? '刚好均摊'
+    : st.luck > 0 ? `多担 ¥ ${fmt(st.luck)}` : `少担 ¥ ${fmt(-st.luck)}`;
+}
 
-// 从历史派生统计（单位: 分）
+// 还款 carry 是净流出（正）/净流入（负），不可当作历史还款总额。
 function calcStats() {
-  let total = 0, paidMe = 0, shareMe = 0, luck2 = 0, n = room.history.length;
-  const r = myRole(), o = otherRole();
+  const ids = memberIds();
+  const byMember = Object.fromEntries(ids.map((id) => [id, {
+    paid: 0, share: 0, repaid: room.repaymentCarry?.[id] || 0,
+    carry: room.repaymentCarry?.[id] || 0, luck: 0, n: 0, net: room.balance?.[id] || 0,
+  }]));
+  let total = 0;
   for (const h of room.history) {
     total += h.amountCents;
-    if (h.payer === r) paidMe += h.amountCents;
-    shareMe += h.shares[r];
-    luck2 += 2 * h.shares[r] - h.amountCents;
+    if (byMember[h.payer]) byMember[h.payer].paid += h.amountCents;
+    const participants = participantsOf(h);
+    for (const id of participants) {
+      const st = byMember[id];
+      if (!st) continue;
+      const share = h.shares?.[id] || 0;
+      st.share += share;
+      st.luck += share - h.amountCents / participants.length;
+      st.n++;
+    }
   }
-  return { total, paidMe, shareMe, luck: luck2 / 2, n, net: room.balance[r] };
+  for (const p of room.repayments) {
+    if (byMember[p.from]) byMember[p.from].repaid += p.amountCents;
+    if (byMember[p.to]) byMember[p.to].repaid -= p.amountCents;
+  }
+  return { total, byMember };
 }
+
+function progressHtml(label, required, approvals = {}) {
+  const waiting = required.filter((id) => !approvals[id]);
+  return `<div class="progress" role="status"><strong>${esc(label)} ${required.length - waiting.length}/${required.length}</strong><br>
+    ${waiting.length ? `等待：${names(waiting)}` : '已全部确认，正在同步…'}</div>`;
+}
+function proposalHtml(pd, prefix, detail, approveLabel) {
+  const required = pd.required || [], mine = pd.by === myRole();
+  const eligible = required.includes(myRole()) && !pd.approvals?.[myRole()] && !mine;
+  return `<div class="card ledger-request" role="region" aria-label="待确认提议">
+    <h3>${mine ? '你' : esc(memberName(pd.by))}发起的提议</h3>
+    <p>${detail}</p>
+    ${progressHtml('已同意', required, pd.approvals)}
+    ${!required.includes(myRole()) ? '<p>本次无需你确认，仅供查看。</p>' : ''}
+    ${eligible ? `<button class="btn" id="${prefix}-approve">${esc(approveLabel)}</button>
+      <button class="btn ghost" id="${prefix}-reject">不同意，取消提议</button>` : ''}
+    ${mine ? `<button class="btn plain" id="${prefix}-withdraw">撤回提议</button>` : ''}
+  </div>`;
+}
+const expandedHistory = new Set();
 
 function fmtTime(ts) {
   const d = new Date(ts), now = new Date();
@@ -477,231 +582,170 @@ function fmtTime(ts) {
 }
 
 function renderRoom() {
-  const r = myRole(), o = otherRole();
-  const P = room.players, meP = P[r], otherP = P[o];
-  // 服务端的 ratio/shares 按 p1 在前存储；展示统一按「我在前」的视角，与掷骰区（我）在左一致
-  const myIx = r === 'p1' ? 0 : 1;
-  const st = calcStats();
-  const net = st.net;
-  const waitingP2 = !P.p2;
-  const ledgerBusy = room.phase !== 'idle' || !!room.ledgerPending;
+  const r = myRole(), P = room.players, ids = memberIds();
+  const stats = calcStats(), st = stats.byMember[r];
+  if (!st) return;
+  const net = st.net, busy = ledgerBusy();
+  const hasCarry = ids.some((id) => stats.byMember[id].carry !== 0);
+  const focusId = document.activeElement?.id;
 
-  /* 结算卡 */
-  let settleV, settleCls, settleK;
-  if (!st.n && !room.repayments.length) { settleK = '还没记过账'; settleV = '先掷一把试试 🎲'; settleCls = ''; }
-  else if (net === 0) { settleK = '目前两清'; settleV = '刚好打平 ✨'; settleCls = ''; }
-  else if (net > 0) { settleK = `${otherP ? otherP.avatar : ''} 应该给你`; settleV = '¥ ' + fmt(net); settleCls = 'in'; }
-  else { settleK = `你应该给 ${otherP ? otherP.avatar : ''}`; settleV = '¥ ' + fmt(-net); settleCls = 'out'; }
-
-  /* 进行中的一笔 */
   let billHtml = '';
-  if (room.phase === 'rolling' || room.phase === 'result') {
-    const b = room.bill;
-    const now = Date.now();
-    const animating = now < rollAnimUntil;
-
-    // 掷骰格子
-    const dieFace = (role) => {
-      if (room.phase === 'result') {
-        return `<div class="die pop">${dieGlyph(b.rolls[role])}</div>`;
-      }
-      if (role === r) {
-        if (animating) return `<div class="die rolling">🎲</div>`;
-        if (myLocalRoll) return `<div class="die pop">${dieGlyph(myLocalRoll)}</div>`;
-        if (b.rolled[role]) return `<div class="die" style="font-size:22px;display:grid;place-items:center">已掷</div>`;
-        return `<div class="die">🎲</div>`;
-      }
-      if (b.rolled && b.rolled[role]) return `<div class="die">🔒</div>`;
-      return `<div class="die">🎲</div>`;
+  if (room.bill && (room.phase === 'rolling' || room.phase === 'result')) {
+    const b = room.bill, participants = participantsOf(b), required = b.required || participants;
+    const participating = participants.includes(r), eligible = required.includes(r);
+    const animating = Date.now() < rollAnimUntil, result = room.phase === 'result';
+    const dieFace = (id) => {
+      if (result) return `<div class="die pop" aria-label="${esc(b.rolls?.[id])} 点">${dieGlyph(b.rolls?.[id])}</div>`;
+      if (id === r && animating) return '<div class="die rolling" aria-label="正在掷骰">⚄</div>';
+      if (id === r && myLocalRoll) return `<div class="die pop" aria-label="${esc(myLocalRoll)} 点">${dieGlyph(myLocalRoll)}</div>`;
+      return b.rolled?.[id] ? '<div class="die waiting">已掷</div>' : '<div class="die" aria-label="等待掷骰">⚄</div>';
     };
-    const boxCls = (role) => ((role === r && myLocalRoll && !animating) || room.phase === 'result') ? 'rolled-ok' : '';
-    const whoLabel = (role) => role === r ? esc(meP.name) + '（我）' : esc(otherP ? otherP.name : '对方');
-
-    const diceHtml = `
-      <div class="dicezone">
-        <div class="diebox ${boxCls(r)}"><div class="who">${whoLabel(r)}</div>${dieFace(r)}</div>
-        <div class="diebox ${boxCls(o)}"><div class="who">${whoLabel(o)}</div>${dieFace(o)}</div>
-      </div>`;
-
-    if (room.phase === 'rolling') {
-      let actionHtml, voidBtn;
-      const pd = b.pending;
-      if (pd && pd.by === r) {
-        actionHtml = `<button class="btn" disabled>⏳ 你提议作废这笔 · 等 ${esc(otherP ? otherP.name : '对方')} 同意</button>
-          <button class="btn plain" id="a-withdraw" style="margin-top:10px">撤回提议</button>`;
-        voidBtn = '';
-      } else if (pd) {
-        actionHtml = `<div class="confirmline">${esc(otherP ? otherP.name : '对方')} 提议作废这笔</div>
-          <button class="btn" id="a-approve">✅ 同意作废</button>
-          <button class="btn ghost" id="a-reject" style="margin-top:10px">🙅 不同意，继续掷</button>`;
-        voidBtn = '';
-      } else {
-        if (animating) actionHtml = `<button class="btn" disabled>骰子滚动中…</button>`;
-        else if (!b.rolled[r]) actionHtml = `<button class="btn" id="a-roll">🎲 掷！</button>`;
-        else actionHtml = `<button class="btn" disabled>${myLocalRoll ? `我掷出了 ${myLocalRoll} 点` : '我已掷骰'} · 等 ${esc(otherP ? otherP.name : '对方')} 掷…</button>`;
-        voidBtn = `<button class="btn plain" id="a-void" style="margin-top:10px">作废这笔</button>`;
+    const diceHtml = `<div class="dicezone">${participants.map((id) => `
+      <div class="diebox ${result || b.rolled?.[id] ? 'rolled-ok' : ''}">
+        <div class="who">${ph(P[id], id)}${id === r ? '（我）' : ''}</div>${dieFace(id)}
+      </div>`).join('')}</div>`;
+    let actions = '';
+    if (b.pending) {
+      const verb = b.pending.type === 'reroll' ? '重掷' : '作废这笔';
+      actions = proposalHtml(b.pending, 'a', `提议${verb}，需下列成员全部同意；任何一人拒绝即取消提议。`, `同意${verb}`);
+    } else if (eligible) {
+      if (!result && participating) {
+        actions += animating ? '<button class="btn" disabled>骰子滚动中…</button>'
+          : !b.rolled?.[r] ? '<button class="btn" id="a-roll">掷骰子</button>' : '<p class="confirmline">你已掷骰，等待其他参与者。</p>';
       }
-      billHtml = `
-        <div class="card fadein">
-          <div class="billhead">
-            <div class="amt">¥ ${fmt(b.amountCents)}</div>
-            <div class="note">${b.note ? esc(b.note) + ' · ' : ''}谁先垫付：${ph(P[b.payer])}</div>
-          </div>
-          <div class="hint">两人各掷一颗 1–${b.faces} 点的骰子，点数比 = 分账比</div>
-          ${diceHtml}
-          ${actionHtml}
-          ${voidBtn}
-        </div>`;
-    } else {
-      // result
-      let confirmLine = '';
-      if (b.confirms[r]) confirmLine = b.confirms[o] ? '' : `你已确认 ✅ · 等待 ${esc(otherP ? otherP.name : '对方')} 确认…`;
-      else if (b.confirms[o]) confirmLine = `${esc(otherP ? otherP.name : '对方')} 已确认 ✅ · 等你拍板`;
-      let actionHtml;
-      const pd = b.pending;
-      if (pd && pd.by === r) {
-        confirmLine = '';
-        actionHtml = `<button class="btn" disabled>⏳ 已提议${pd.type === 'reroll' ? '重掷' : '作废这笔'} · 等 ${esc(otherP.name)} 回应</button>
-          <button class="btn plain" id="a-withdraw" style="margin-top:10px">撤回提议</button>`;
-      } else if (pd) {
-        actionHtml = `<button class="btn" id="a-approve">✅ 同意${pd.type === 'reroll' ? '重掷' : '作废'}</button>
-          <button class="btn ghost" id="a-reject" style="margin-top:10px">🙅 不同意</button>`;
-        confirmLine = `${esc(otherP.name)} 提议${pd.type === 'reroll' ? '重掷' : '作废这笔'} · 等你回应`;
-      } else {
-        actionHtml = `${b.confirms[r] ? '' : `<button class="btn" id="a-confirm">✅ 就这样，记入账本</button>
-          <button class="btn ghost" id="a-reroll" style="margin-top:10px">🔄 不服，重掷</button>`}
-          <button class="btn plain" id="a-void" style="margin-top:10px">作废这笔</button>`;
+      if (result) {
+        actions += !b.confirms?.[r] ? '<button class="btn" id="a-confirm">确认，记入账本</button>' : '<p class="confirmline">你已确认，等待其他成员。</p>';
+        actions += '<button class="btn ghost" id="a-reroll">不服，提议重掷</button>';
       }
-      billHtml = `
-        <div class="card fadein">
-          <div class="billhead">
-            <div class="amt">¥ ${fmt(b.amountCents)}</div>
-            <div class="note">${b.note ? esc(b.note) + ' · ' : ''}谁先垫付：${ph(P[b.payer])}</div>
-          </div>
-          <div class="ratio"><span class="av">${meP.avatar}</span> ${b.ratio[myIx]} : ${b.ratio[1 - myIx]} <span class="av">${otherP.avatar}</span></div>
-          ${diceHtml}
-          <div class="shares">
-            <div class="s${r === 'p1' ? 1 : 2}"><div class="who">${esc(meP.name)}</div><div class="m">¥ ${fmt(b.shares[r])}</div></div>
-            <div class="s${r === 'p1' ? 2 : 1}"><div class="who">${esc(otherP.name)}</div><div class="m">¥ ${fmt(b.shares[o])}</div></div>
-          </div>
-          <div class="confirmline">${confirmLine}${b.rerolls ? `<span class="rr">重掷 ×${b.rerolls}</span>` : ''}</div>
-          ${actionHtml}
-        </div>`;
+      actions += '<button class="btn plain" id="a-void">提议作废这笔</button>';
     }
+    billHtml = `<section class="card fadein" aria-label="当前分账">
+      <div class="billhead">
+        <div class="amt">¥ ${fmt(b.amountCents)}</div>
+        <div class="note">${b.note ? esc(b.note) + ' · ' : ''}垫付：${ph(P[b.payer], b.payer)}</div>
+      </div>
+      <p class="hint">${participants.length} 人参与 · 每人 1–${esc(b.faces)} 点 · 点数比就是分账比<br>参与名单已锁定，新加入的成员不影响这一笔。</p>
+      ${!participating ? `<p class="hint">${eligible ? '你不分摊这一笔，但临时模式替换旧账本需要你确认；也可提议或回应重掷、作废。' : '你未参与这一笔，仅可查看，无需操作。'}</p>` : ''}
+      ${diceHtml}
+      ${result ? `
+        <div class="ratio">分账比 ${participants.map((id, i) => esc(b.ratio?.[i] ?? '—')).join(' : ')}</div>
+        <div class="shares">${participants.map((id, i) => `<div class="s${i % 2 + 1}">
+          <div class="who">${ph(P[id], id)}</div><div class="m">¥ ${fmt(b.shares?.[id] || 0)}</div>
+          <div class="hint">比例 ${esc(b.ratio?.[i] ?? '—')}</div></div>`).join('')}</div>
+        ${progressHtml('已确认入账', required, b.confirms)}` : progressHtml('已掷骰', participants, b.rolled)}
+      ${b.rerolls ? `<p class="confirmline">重掷 ${esc(b.rerolls)} 次</p>` : ''}
+      ${actions}
+    </section>`;
   }
 
-  /* 历史 */
-  const histHtml = room.history.length ? room.history.map((h) => `
-    <div class="card hitem" style="padding:13px 14px">
-      <div class="dice">${dieGlyph(h.rolls[r])}${dieGlyph(h.rolls[o])}</div>
-      <div class="mid">
-        <div class="t">${h.note ? esc(h.note) : '（没有备注）'}${h.rerolls ? `<span class="rr">重掷 ×${h.rerolls}</span>` : ''}</div>
-        <div class="d">${fmtTime(h.ts)} · ${h.ratio[myIx]}:${h.ratio[1 - myIx]}${h.faces && h.faces !== 6 ? ` · ${h.faces}面` : ''} · ${ph(room.players[h.payer])}垫付</div>
+  const histHtml = room.history.length ? room.history.map((h) => {
+    const participants = participantsOf(h), mine = participants.includes(r);
+    return `<article class="card history-card">
+      <div class="hitem">
+        <div class="mid">
+          <div class="t">${esc(h.note || '没有备注')}${h.rerolls ? `<span class="rr">重掷 ×${esc(h.rerolls)}</span>` : ''}</div>
+          <div class="d">${fmtTime(h.ts)} · ${participants.length} 人 · ${ph(P[h.payer], h.payer)}垫付</div>
+        </div>
+        <div class="right"><div class="sum">¥ ${fmt(h.amountCents)}</div>
+          <div class="mine">${mine ? '我承担 ¥ ' + fmt(h.shares?.[r] || 0) : '我未参与'}</div></div>
+        <button class="del" data-del="${esc(h.id)}" aria-label="提议删除消费：${esc(h.note || '未备注消费')}" ${busy ? 'disabled' : ''}>×</button>
       </div>
-      <div class="right">
-        <div class="sum">¥ ${fmt(h.amountCents)}</div>
-        <div class="mine">我 ¥ ${fmt(h.shares[r])}</div>
-      </div>
-      <button class="del" data-del="${h.id}" title="提议删除消费" aria-label="提议删除消费" ${ledgerBusy ? 'disabled' : ''}>✕</button>
-    </div>`).join('')
-    : `<div class="empty">${temporaryMode ? '临时账本还空着<br>这里只保留最近一笔分账' : '账本还空着<br>每一笔都会记在这里 📖'}</div>`;
+      <details data-history="${esc(h.id)}" ${expandedHistory.has(String(h.id)) ? 'open' : ''}>
+        <summary>查看 ${participants.length} 人的点数与分摊 · ${esc(h.faces || 6)} 面骰</summary>
+        <div class="shares">${participants.map((id, i) => `<div class="s${i % 2 + 1}">
+          <div class="who">${ph(P[id], id)}</div><div class="dice" aria-label="${esc(h.rolls?.[id])} 点">${dieGlyph(h.rolls?.[id])}</div>
+          <div class="hint">比例 ${esc(h.ratio?.[i] ?? '—')}</div><div class="m">¥ ${fmt(h.shares?.[id] || 0)}</div>
+        </div>`).join('')}</div>
+      </details>
+    </article>`;
+  }).join('') : `<div class="empty">账本还空着<br>${temporaryMode ? '这里只保留最近一笔分账' : '每次确认的分账都会记在这里'}</div>`;
 
-  const repaymentsHtml = room.repayments.map((p) => `
-    <div class="card hitem">
-      <div class="repayment-tag">还款</div>
-      <div class="mid">
-        <div class="t">${esc(P[p.from].name)} → ${esc(P[p.to].name)}</div>
-        <div class="d">${fmtTime(p.ts)} · 双方已确认</div>
-      </div>
-      <div class="right"><div class="sum">¥ ${fmt(p.amountCents)}</div><div class="mine">${p.from === r ? '我已支付' : '我已收到'}</div></div>
-      <button class="del" data-del-repayment="${p.id}" aria-label="提议删除还款记录" ${ledgerBusy ? 'disabled' : ''}>×</button>
-    </div>`).join('');
+  const repaymentsHtml = room.repayments.map((p) => `<div class="card hitem">
+    <div class="repayment-tag">还款</div>
+    <div class="mid"><div class="t">${esc(memberName(p.from))} → ${esc(memberName(p.to))}</div>
+      <div class="d">${fmtTime(p.ts)} · 付款人与收款人已确认</div></div>
+    <div class="right"><div class="sum">¥ ${fmt(p.amountCents)}</div>
+      <div class="mine">${p.from === r ? '我已支付' : p.to === r ? '我已收到' : '其他成员还款'}</div></div>
+    ${[p.from, p.to].includes(r) ? `<button class="del" data-del-repayment="${esc(p.id)}" aria-label="提议删除还款记录" ${busy ? 'disabled' : ''}>×</button>` : ''}
+  </div>`).join('');
 
   let ledgerHtml = '';
   const pending = room.ledgerPending;
   if (pending) {
     let detail, approveLabel;
     if (pending.type === 'repay') {
-      detail = `${ph(P[pending.from])} → ${ph(P[pending.to])} · ¥ ${fmt(pending.amountCents)}<br>请核实实际转账，双方确认后才抵扣欠款。`;
+      detail = `${ph(P[pending.from], pending.from)} → ${ph(P[pending.to], pending.to)} · ¥ ${fmt(pending.amountCents)}<br>请核实实际转账，仅付款人与收款人确认后才抵扣余额。`;
       approveLabel = pending.to === r ? '确认已收到这笔还款' : '确认已支付这笔还款';
     } else if (pending.type === 'clearHistory') {
-      detail = `清空 ${room.history.length} 笔消费和 ${room.repayments.length} 笔还款记录，余额归零；确认后不可恢复。`;
+      detail = `清空 ${room.history.length} 笔消费、${room.repayments.length} 条还款明细及已省略还款净额，余额归零。需所有成员同意，确认后不可恢复。`;
       approveLabel = '同意清空全部记录';
     } else if (pending.type === 'deleteHistory') {
       const h = room.history.find((h) => h.id === pending.historyId);
-      detail = `删除消费：${esc(h.note || '未备注消费')} · ¥ ${fmt(h.amountCents)}<br>${temporaryMode ? '同时清理这笔分账的还款与已还金额汇总，余额归零。' : '删除后重新计算余额，不撤销已经发生的转账。'}`;
+      detail = `删除消费：${esc(h?.note || '未备注消费')} · ¥ ${fmt(h?.amountCents || 0)}<br>需所有成员同意。${temporaryMode ? '同时清理这笔分账的还款与还款净额汇总，余额归零。' : '重算余额，但不撤销已经发生的转账。'}`;
       approveLabel = '同意删除这笔消费';
     } else {
-      const p = room.repayments.find((p) => p.id === pending.repaymentId);
-      detail = `删除还款：${ph(P[p.from])} → ${ph(P[p.to])} · ¥ ${fmt(p.amountCents)}<br>删除后恢复这笔还款抵扣的欠款。`;
+      const p = room.repayments.find((p) => p.id === pending.repaymentId) || pending;
+      detail = `删除还款：${ph(P[p.from], p.from)} → ${ph(P[p.to], p.to)} · ¥ ${fmt(p.amountCents || 0)}<br>仅付款人与收款人确认。撤销这笔还款的余额抵扣，不撤销实际转账。`;
       approveLabel = '同意删除这笔还款';
     }
-    ledgerHtml = `<div class="card ledger-request" role="region" aria-label="账本待确认操作">
-      <h3>${pending.by === r ? '你的提议，等待对方确认' : esc(otherP.name) + ' 发来账本确认'}</h3>
-      <p>${detail}</p>
-      ${pending.by === r ? '<button class="btn plain" id="l-withdraw">撤回提议</button>' : `
-        <button class="btn" id="l-approve">${approveLabel}</button>
-        <button class="btn ghost" id="l-reject">不同意，保留原记录</button>`}
-    </div>`;
+    ledgerHtml = proposalHtml(pending, 'l', detail, approveLabel);
   }
 
-  const luckTxt = st.n === 0 ? '—'
-    : st.luck > 0 ? `多担 ¥ ${fmt(st.luck)}（手气背）`
-    : st.luck < 0 ? `少担 ¥ ${fmt(-st.luck)}（手气旺）` : '刚好均摊';
-
+  $app.classList.add('room-view');
   $app.innerHTML = `
-    <div class="topbar">
-      <div class="title">🎲 骰子分账</div>
-      <button class="iconbtn" id="a-settings">⚙️</button>
-    </div>
-
+    <div class="topbar"><div class="title">骰子分账</div>
+      <button class="btn plain small" id="a-settings" aria-label="打开设置与个人恢复码">设置</button></div>
     ${temporaryNotice()}
-    <div class="card roomcard">
-      <div>
-        <div class="code">${room.code}</div>
-        <label style="margin:4px 0 0">房间码 · 点右侧邀请</label>
+    <aside class="recovery-reminder" aria-label="身份恢复提醒">
+      <p>${me.recoveryCode ? '请私下保存你的个人恢复码。换设备或退出后，需要它才能回到同一身份。' : '你的旧身份还没有恢复码。请先在设置中生成并保存，以免退出后无法找回。'}</p>
+      <button class="btn ghost small" id="a-recovery">${me.recoveryCode ? '保存恢复码' : '生成恢复码'}</button>
+    </aside>
+    <section class="card roomcard" aria-label="房间成员">
+      <div class="room-heading"><div><div class="code">${esc(room.code)}</div>
+        <p class="hint">房间码 · ${ids.length}/${esc(room.capacity || 2)} 人已加入</p></div>
+        ${ids.length < (room.capacity || 2) ? '<button class="btn small" id="a-invite">邀请朋友</button>' : '<span class="hint">房间已满</span>'}
       </div>
-      <div class="players">
-        ${['p1','p2'].map((role) => {
-          const p = room.players[role];
-          return p ? `<div class="player"><div class="face">${p.avatar}<span class="dot ${p.online ? 'on' : ''}"></span></div>
-            <div class="name">${esc(p.name)}${role === r ? '（我）' : ''}</div></div>`
-          : `<div class="player"><div class="face" style="filter:grayscale(1);opacity:.4">❓</div><div class="name">待加入</div></div>`;
-        }).join('')}
-      </div>
-    </div>
-
-    ${waitingP2 ? `
-      <div class="card settle">
-        <div class="k">把房间码发给对方，等 TA 加入</div>
-        <div class="v" style="font-size:34px;letter-spacing:6px;">${room.code}</div>
-        <button class="btn small" id="a-invite" style="margin-top:12px">📋 复制邀请链接</button>
-      </div>` : `
-      <div class="card settle">
-        <div class="k">${settleK}</div>
-        <div class="v ${settleCls}">${settleV}</div>
-        <div class="sub">以五五开为基准，你的手气：${luckTxt}</div>
-        ${room.repayments.length || room.repaymentCarryCents ? '<div class="sub">余额已抵扣双方确认的还款</div>' : ''}
-        ${temporaryMode && room.repaymentCarryCents ? `<div class="sub">旧还款明细已清理，仍计入已还金额 ¥ ${fmt(Math.abs(room.repaymentCarryCents))}</div>` : ''}
-        ${net !== 0 ? `<button class="btn ghost small" id="a-repay" style="margin:14px auto 0" ${ledgerBusy ? 'disabled' : ''}>记录还款 / 结清</button>` : ''}
-        <div class="stats">
-          <div><div class="n">${st.n}</div><div class="l">笔数</div></div>
-          <div><div class="n">¥ ${fmt(st.total)}</div><div class="l">总消费</div></div>
-          <div><div class="n">¥ ${fmt(st.paidMe)}</div><div class="l">我垫付</div></div>
-          <div><div class="n">¥ ${fmt(st.shareMe)}</div><div class="l">我承担</div></div>
-        </div>
-      </div>`}
-
+      <div class="players">${ids.map((id) => {
+        const p = P[id];
+        return `<div class="player"><div class="face">${esc(p.avatar)}<span class="dot ${p.online ? 'on' : ''}" aria-hidden="true"></span></div>
+          <div class="name">${esc(p.name)}${id === r ? '（我）' : ''}</div><div class="status">${esc(id)} · ${p.online ? '在线' : '离线'}</div></div>`;
+      }).join('')}</div>
+      ${ids.length < 2 ? '<p class="hint">再来一位就能开掷。发出邀请，让朋友入座吧。</p>' : ''}
+    </section>
+    <section class="card settle" aria-label="我的结算">
+      <div class="k">${net > 0 ? '我还应收回' : net < 0 ? '我还需要支付' : room.history.length ? '我的余额已两清' : '还没有消费记录'}</div>
+      <div class="v ${net > 0 ? 'in' : net < 0 ? 'out' : ''}">¥ ${fmt(Math.abs(net))}</div>
+      <div class="sub">以每笔参与者均摊为基准，我的手气：${luckText(st)}</div>
+      ${room.repayments.length || hasCarry ? '<div class="sub">余额已计入所有确认的还款净额</div>' : ''}
+      ${net !== 0 ? `<button class="btn ghost small" id="a-repay" style="margin:14px auto 0" ${busy ? 'disabled' : ''}>记录还款 / 部分结清</button>` : ''}
+      <div class="stats"><div><div class="n">${st.n}</div><div class="l">我参与的笔数</div></div>
+        <div><div class="n">¥ ${fmt(stats.total)}</div><div class="l">房间总消费</div></div>
+        <div><div class="n">¥ ${fmt(st.paid)}</div><div class="l">我垫付</div></div>
+        <div><div class="n">¥ ${fmt(st.share)}</div><div class="l">我承担</div></div></div>
+    </section>
     ${ledgerHtml}
-    ${(room.phase === 'idle' && !waitingP2 && !room.ledgerPending) ? `<button class="btn" id="a-new">＋ 记一笔，掷骰分账</button>` : ''}
+    ${!busy && ids.length >= 2 ? '<button class="btn" id="a-new">＋ 记一笔，掷骰分账</button>' : ''}
     ${billHtml}
-
-    <div class="h2">📖 ${temporaryMode ? '临时账本' : '账本'} <span>${temporaryMode ? '仅最近一笔 · 双方同步' : room.history.length + ' 笔消费 · 双方同步'}</span></div>
+    <div class="h2">大家的账 <span>按成员汇总 · 实时同步</span></div>
+    <p class="hint">还款净额 = 已还出 − 已收回；正数抵扣应付，负数抵扣应收。不是累计转账总额。</p>
+    <div class="member-stats">${ids.map((id) => {
+      const s = stats.byMember[id];
+      return `<section class="member-stat"><h3>${ph(P[id], id)}${id === r ? '（我）' : ''}</h3><dl>
+        <div><dt>承担 · ${s.n} 笔</dt><dd>¥ ${fmt(s.share)}</dd></div>
+        <div><dt>垫付</dt><dd>¥ ${fmt(s.paid)}</dd></div>
+        <div><dt>还款净额</dt><dd>${repaidText(s.repaid)}</dd></div>
+        ${hasCarry ? `<div><dt>其中已省略明细</dt><dd>${repaidText(s.carry)}</dd></div>` : ''}
+        <div><dt>相对均摊</dt><dd>${luckText(s)}</dd></div>
+        <div class="net"><dt>余额</dt><dd class="${s.net > 0 ? 'in' : s.net < 0 ? 'out' : ''}">${netText(s.net)}</dd></div>
+      </dl></section>`;
+    }).join('')}</div>
+    ${hasCarry ? '<p class="hint">已省略还款按每位成员的净额保留，并与可见明细合并计算；无法据此还原历史总付款或总收款。</p>' : ''}
+    <div class="h2">${temporaryMode ? '临时账本' : '账本'} <span>${temporaryMode ? '仅最近一笔' : room.history.length + ' 笔消费'}</span></div>
     ${histHtml}
     ${room.repayments.length ? `<div class="h2">还款记录 <span>${temporaryMode ? '仅最近一条明细' : room.repayments.length + ' 笔 · 不计入消费'}</span></div>${repaymentsHtml}` : ''}
   `;
-
   bindRoomEvents();
+  if (!$modal.firstElementChild && focusId) document.getElementById(focusId)?.focus({ preventScroll: true });
 }
 
 function bindRoomEvents() {
@@ -721,6 +765,11 @@ function bindRoomEvents() {
   on('a-new', () => openBillSheet());
   on('a-repay', () => openRepaymentSheet());
   on('a-settings', () => openSettings());
+  on('a-recovery', () => openSettings(me.recoveryCode ? 's-recovery' : 's-recovery-reset'));
+  $app.querySelectorAll('[data-history]').forEach((el) => el.addEventListener('toggle', () => {
+    if (!el.isConnected) return;
+    if (el.open) expandedHistory.add(el.dataset.history); else expandedHistory.delete(el.dataset.history);
+  }));
   const proposalId = room.ledgerPending?.id;
   on('l-approve', () => act({ type: 'ledgerRespond', proposalId, approve: true }));
   on('l-reject', () => act({ type: 'ledgerRespond', proposalId, approve: false }));
@@ -741,18 +790,27 @@ function bindRoomEvents() {
   on('a-reject', () => act({ type: 'respond', proposalId: billProposalId, approve: false }));
   on('a-withdraw', () => act({ type: 'withdraw', proposalId: billProposalId }));
   document.querySelectorAll('[data-del]').forEach((b) => b.addEventListener('click', () => {
-    if (confirm(temporaryMode ? '提议删除这笔临时分账及其还款？对方同意后清理记录与已还金额汇总，余额归零。' : '提议删除这条消费？对方同意后才会删除并重算余额。')) act({ type: 'deleteHistory', id: b.dataset.del });
+    if (ledgerBusy()) return;
+    if (confirm(temporaryMode ? '提议删除这笔临时分账及其还款？所有成员同意后清理记录与还款净额汇总，余额归零。' : '提议删除这条消费？所有成员同意后才会删除并重算余额。')) act({ type: 'deleteHistory', id: b.dataset.del });
   }));
   document.querySelectorAll('[data-del-repayment]').forEach((b) => b.addEventListener('click', () => {
-    if (confirm('提议删除这条还款？对方同意后将撤销这笔抵扣。')) act({ type: 'deleteRepayment', id: b.dataset.delRepayment });
+    if (ledgerBusy()) return;
+    if (confirm('提议删除这条还款？付款人与收款人同意后将撤销这笔余额抵扣。')) act({ type: 'deleteRepayment', id: b.dataset.delRepayment });
   }));
 }
 
 /* ============ 记一笔弹层 ============ */
-let billForm = { amount: '', note: '', payer: 'p1' };
+let billForm = { amount: '', note: '', payer: '', participants: [] };
 
+function parseCents(value) {
+  value = value.trim();
+  if (!/^(?:\d+(?:\.\d{0,2})?|\.\d{1,2})$/.test(value)) return null;
+  const cents = Math.round(Number(value) * 100);
+  return Number.isSafeInteger(cents) && cents > 0 ? cents : null;
+}
 function openBillSheet() {
-  billForm = { amount: '', note: '', payer: me.role };
+  if (ledgerBusy() || memberIds().length < 2) return;
+  billForm = { amount: '', note: '', payer: me.role, participants: memberIds() };
   renderBillSheet();
 }
 
@@ -760,153 +818,244 @@ function renderBillSheet() {
   const P = room.players;
   $modal.innerHTML = `
     <div class="mask" id="mask">
-      <div class="sheet" onclick="event.stopPropagation()">
-        <h3>🎲 记一笔</h3>
-        <div class="amt-input"><span class="yen">¥</span>
-          <input type="tel" inputmode="decimal" id="b-amount" placeholder="0.00" autofocus></div>
-        ${temporaryMode ? '<p class="hint">双方确认入账后，将自动删除上一笔分账及其还款，余额只计算新的一笔。</p>' : ''}
-        <label>备注（选填，比如：晚饭 · 火锅）</label>
-        <input type="text" id="b-note" maxlength="30" placeholder="这顿是干啥的">
-        <label>这次谁先垫付的？</label>
-        <div class="chips">
-          <button data-payer="p1" class="${billForm.payer === 'p1' ? 'on' : ''}">${P.p1.avatar} ${esc(P.p1.name)}</button>
-          <button data-payer="p2" class="${billForm.payer === 'p2' ? 'on' : ''}">${P.p2 ? P.p2.avatar + ' ' + esc(P.p2.name) : '对方'}</button>
-        </div>
-        <button class="btn" id="b-go">🎲 开掷</button>
+      <div class="sheet" role="dialog" aria-modal="true" aria-labelledby="bill-title">
+        <h3 id="bill-title">记一笔，让骰子决定</h3>
+        <label for="b-amount">消费总金额（元）</label>
+        <div class="amt-input"><span class="yen" aria-hidden="true">¥</span>
+          <input type="text" inputmode="decimal" id="b-amount" placeholder="0.00" value="${esc(billForm.amount)}"></div>
+        ${temporaryMode ? '<p class="hint">开掷时所有已加入的成员都需确认（包括不参与分摊的人）。确认入账后，旧分账、还款及还款净额汇总会被替换，余额只计算新的一笔。</p>' : '<p class="hint">仅本次参与者需要掷骰与确认。未参与者可以旁观。</p>'}
+        <label for="b-note">备注（选填，比如：晚饭 · 火锅）</label>
+        <input type="text" id="b-note" maxlength="30" placeholder="这顿是干啥的" value="${esc(billForm.note)}">
+        <fieldset><legend>谁来分摊？至少两人，发起人必须参与</legend>
+          <div class="participant-picker">${memberIds().map((id) => `<label>
+            <input type="checkbox" data-participant="${esc(id)}" ${billForm.participants.includes(id) ? 'checked' : ''} ${id === me.role ? 'disabled' : ''}>
+            <span>${ph(P[id], id)}${id === me.role ? '（我，必选）' : ''}</span></label>`).join('')}</div>
+        </fieldset>
+        <label for="b-payer">谁先垫付？仅可选择本次参与者</label>
+        <select id="b-payer"></select>
+        <p class="hint" id="b-count" role="status"></p>
+        <button class="btn" id="b-go">开掷</button>
         <button class="btn plain" id="b-cancel">先不记了</button>
       </div>
     </div>`;
-  const amt = document.getElementById('b-amount');
-  amt.addEventListener('input', (e) => {
-    billForm.amount = e.target.value.replace(/[^\d.]/g, '').replace(/(\..*)\./g, '$1');
-    if (billForm.amount !== e.target.value) e.target.value = billForm.amount;
-  });
+  const amt = document.getElementById('b-amount'), payer = document.getElementById('b-payer');
+  const syncPayers = () => {
+    if (!billForm.participants.includes(billForm.payer)) billForm.payer = me.role;
+    payer.innerHTML = billForm.participants.map((id) => `<option value="${esc(id)}" ${id === billForm.payer ? 'selected' : ''}>${ph(P[id], id)}</option>`).join('');
+    document.getElementById('b-count').textContent = `已选择 ${billForm.participants.length} 人；开始后名单锁定。`;
+    document.getElementById('b-go').disabled = billForm.participants.length < 2;
+  };
+  syncPayers();
+  amt.addEventListener('input', (e) => { billForm.amount = e.target.value; });
   document.getElementById('b-note').addEventListener('input', (e) => { billForm.note = e.target.value; });
-  $modal.querySelectorAll('[data-payer]').forEach((b) => b.addEventListener('click', () => {
-    billForm.payer = b.dataset.payer; renderBillSheet();
-    // 重绘后恢复焦点与已输入内容
-    document.getElementById('b-amount').value = billForm.amount;
-    document.getElementById('b-note').value = billForm.note;
+  payer.addEventListener('change', (e) => { billForm.payer = e.target.value; });
+  $modal.querySelectorAll('[data-participant]').forEach((input) => input.addEventListener('change', () => {
+    billForm.participants = Array.from($modal.querySelectorAll('[data-participant]')).filter((el) => el.checked).map((el) => el.dataset.participant);
+    syncPayers();
   }));
   document.getElementById('b-cancel').addEventListener('click', closeModal);
-  document.getElementById('mask').addEventListener('click', (e) => { if (e.target.id === 'mask') closeModal(); });
-  document.getElementById('b-go').addEventListener('click', async () => {
-    const cents = Math.round(parseFloat(billForm.amount) * 100);
-    if (!cents || cents <= 0) { toast('先填个金额呀'); return; }
-    if (billForm.amount.split('.').length === 2 && billForm.amount.split('.')[1].length > 2) { toast('最多到分哦'); return; }
-    try {
-      await api('/api/action', { code: me.code, token: me.token, type: 'start',
-        amountCents: cents, note: billForm.note, payer: billForm.payer });
-      closeModal();
-      rollAnimUntil = 0;
-    } catch (e) { toast(e.message); }
-  });
-  setTimeout(() => amt.focus(), 250);
-}
-
-function openRepaymentSheet() {
-  const net = room.balance[me.role];
-  const amount = Math.abs(net);
-  const from = net < 0 ? me.role : otherRole();
-  const to = from === 'p1' ? 'p2' : 'p1';
-  $modal.innerHTML = `
-    <div class="mask" id="mask">
-      <div class="sheet" role="dialog" aria-modal="true" aria-labelledby="repay-title">
-        <h3 id="repay-title">记录已发生的还款</h3>
-        <p class="hint">${ph(room.players[from])} → ${ph(room.players[to])}</p>
-        <label for="repay-amount">还款金额 · 当前待还 ¥ ${fmt(amount)}</label>
-        <div class="amt-input"><span class="yen">¥</span>
-          <input type="tel" inputmode="decimal" id="repay-amount" value="${(amount / 100).toFixed(2)}"></div>
-        <button class="btn ghost small" id="repay-all" style="margin:10px auto">填入全部欠款</button>
-        <p class="hint">可以只还一部分；另一人确认后才抵扣余额。<br>这里只记账，不会发起真实转账。</p>
-        <button class="btn" id="repay-go">提交给对方确认</button>
-        <button class="btn plain" id="repay-cancel">取消</button>
-      </div>
-    </div>`;
-  const input = document.getElementById('repay-amount');
-  document.getElementById('repay-all').addEventListener('click', () => { input.value = (amount / 100).toFixed(2); });
-  document.getElementById('repay-cancel').addEventListener('click', closeModal);
-  document.getElementById('mask').addEventListener('click', (e) => { if (e.target.id === 'mask') closeModal(); });
-  document.getElementById('repay-go').addEventListener('click', async (e) => {
-    const value = input.value.trim();
-    const cents = Math.round(Number(value) * 100);
-    if (!/^(?:\d+(?:\.\d{0,2})?|\.\d{1,2})$/.test(value) || !Number.isSafeInteger(cents) || cents < 1 || cents > amount) {
-      toast('请输入大于零、不超过欠款的金额，最多两位小数'); return;
+  document.getElementById('b-go').addEventListener('click', async (e) => {
+    if (ledgerBusy()) { toast('有分账或账本提议正在进行，请稍后再记'); return; }
+    const cents = parseCents(billForm.amount), participants = [...new Set(billForm.participants)];
+    if (cents === null) { toast('请输入大于零的金额，最多两位小数'); amt.focus(); return; }
+    if (participants.length < 2 || !participants.includes(me.role) || !participants.includes(billForm.payer) || participants.some((id) => !room.players[id])) {
+      toast('至少选择两人，且必须包括你和垫付人'); return;
     }
     const button = e.currentTarget;
     button.disabled = true;
     try {
-      await api('/api/action', { code: me.code, token: me.token, type: 'repay', amountCents: cents });
-      closeModal();
-      toast('已提交，等待对方核实还款');
+      await api('/api/action', { code: me.code, token: me.token, type: 'start',
+        amountCents: cents, note: billForm.note, payer: billForm.payer, participants });
+      closeModal(); rollAnimUntil = 0;
     } catch (err) { button.disabled = false; toast(err.message); }
   });
+  setupModal('b-amount');
 }
 
-function openSettings() {
-  const P = room.players, r = me.role;
+function repaymentPair(counterpart) {
+  const net = room.balance[me.role] || 0;
+  const from = net < 0 ? me.role : counterpart, to = net < 0 ? counterpart : me.role;
+  const amount = Math.min(1000000000, -(room.balance[from] || 0), room.balance[to] || 0);
+  return { from, to, amount: Math.max(0, amount) };
+}
+function openRepaymentSheet() {
+  if (ledgerBusy()) return;
+  const net = room.balance[me.role] || 0;
+  const counterparts = memberIds().filter((id) => id !== me.role && (net < 0 ? room.balance[id] > 0 : net > 0 && room.balance[id] < 0));
+  if (!counterparts.length) { toast('目前没有可记录还款的对象'); return; }
   $modal.innerHTML = `
     <div class="mask" id="mask">
-      <div class="sheet">
-        <h3>⚙️ 设置</h3>
-        <label>我的昵称</label>
+      <div class="sheet" role="dialog" aria-modal="true" aria-labelledby="repay-title">
+        <h3 id="repay-title">记录已发生的还款</h3>
+        <label for="repay-counterpart">${net < 0 ? '我已还给谁？' : '谁已还给我？'}仅显示余额方向相反的成员</label>
+        <select id="repay-counterpart">${counterparts.map((id) => `<option value="${esc(id)}">${ph(room.players[id], id)} · ${esc(netText(room.balance[id]))}</option>`).join('')}</select>
+        <p class="hint" id="repay-direction"></p>
+        <label for="repay-amount" id="repay-limit"></label>
+        <div class="amt-input"><span class="yen" aria-hidden="true">¥</span>
+          <input type="text" inputmode="decimal" id="repay-amount" aria-describedby="repay-limit"></div>
+        <button class="btn ghost small" id="repay-all" style="margin:10px auto">填入本次可还上限</button>
+        <p class="hint">可只还一部分，最多为付款人应付与收款人应收的较小值。仅双方确认后抵扣余额。<br>这里只记账，不发起真实转账。</p>
+        <button class="btn" id="repay-go">提交给对方确认</button>
+        <button class="btn plain" id="repay-cancel">取消</button>
+      </div>
+    </div>`;
+  const input = document.getElementById('repay-amount'), select = document.getElementById('repay-counterpart');
+  const update = () => {
+    const pair = repaymentPair(select.value);
+    input.value = (pair.amount / 100).toFixed(2);
+    document.getElementById('repay-limit').textContent = `还款金额（元）· 本次最多 ¥ ${fmt(pair.amount)}`;
+    document.getElementById('repay-direction').textContent = `${memberName(pair.from)} → ${memberName(pair.to)}`;
+  };
+  update();
+  select.addEventListener('change', update);
+  document.getElementById('repay-all').addEventListener('click', update);
+  document.getElementById('repay-cancel').addEventListener('click', closeModal);
+  document.getElementById('repay-go').addEventListener('click', async (e) => {
+    if (ledgerBusy()) { toast('请等待当前分账或账本提议完成'); return; }
+    const { from, to, amount } = repaymentPair(select.value), cents = parseCents(input.value);
+    if (cents === null || cents > amount || !room.players[from] || !room.players[to]) {
+      toast('请输入大于零、不超过本次可还上限的金额，最多两位小数'); input.focus(); return;
+    }
+    const button = e.currentTarget;
+    button.disabled = true;
+    try {
+      await api('/api/action', { code: me.code, token: me.token, type: 'repay', from, to, amountCents: cents });
+      closeModal(); toast('已提交，等待对方核实还款');
+    } catch (err) { button.disabled = false; toast(err.message); }
+  });
+  setupModal('repay-counterpart');
+}
+
+function openSettings(initialFocus = 's-name') {
+  const P = room.players, r = me.role;
+  const hasRecords = room.history.length || room.repayments.length || Object.values(room.repaymentCarry || {}).some((n) => n !== 0);
+  $modal.innerHTML = `
+    <div class="mask" id="mask">
+      <div class="sheet" role="dialog" aria-modal="true" aria-labelledby="settings-title">
+        <h3 id="settings-title">房间设置</h3>
+        <label for="s-name">我的昵称</label>
         <input type="text" id="s-name" maxlength="12" value="${esc(P[r].name)}">
-        <label>我的头像</label>
-        <div class="avatars" id="s-avs">${AVATARS.map((a) =>
-          `<button data-av="${a}" class="${P[r].avatar === a ? 'on' : ''}">${a}</button>`).join('')}</div>
-        <label>骰子面数 · 每人掷 1–N 点</label>
-        <div class="chips" id="s-faces">${[4, 6, 8, 10, 12, 20].map((f) =>
-          `<button data-faces="${f}" class="${(room.faces || 6) === f ? 'on' : ''}">${f}面</button>`).join('')}</div>
-        <label>账本管理</label>
-        <div style="display:flex; gap:8px">
-          <button class="btn danger" style="flex:1;margin-top:0" id="s-clear" ${room.phase !== 'idle' || room.ledgerPending || (!room.history.length && !room.repayments.length) ? 'disabled' : ''}>提议清空账本</button>
-          <button class="btn plain" style="flex:1;margin-top:0" id="s-leave">退出房间</button>
+        <fieldset><legend>我的头像</legend>
+          <div class="avatars" id="s-avs">${AVATARS.map((a, i) =>
+            `<button data-av="${esc(a)}" aria-label="头像 ${i + 1}" aria-pressed="${P[r].avatar === a}" class="${P[r].avatar === a ? 'on' : ''}">${esc(a)}</button>`).join('')}</div>
+        </fieldset>
+        <fieldset><legend>骰子面数 · 每人掷 1–N 点</legend>
+          <div class="chips" id="s-faces">${[4, 6, 8, 10, 12, 20].map((f) =>
+            `<button data-faces="${f}" aria-pressed="${(room.faces || 6) === f}" class="${(room.faces || 6) === f ? 'on' : ''}" ${ledgerBusy() ? 'disabled' : ''}>${f}面</button>`).join('')}</div>
+        </fieldset>
+        <h4>个人身份与恢复</h4>
+        <p class="hint">房间码 <b>${esc(room.code)}</b> · 成员编号 <b>${esc(r)}</b><br>编号不会随昵称或设备改变。恢复身份只需房间码和你自己的恢复码。</p>
+        <label for="s-recovery">我的恢复码 · 请保密，不要发到群里</label>
+        <input type="text" id="s-recovery" class="recovery-code" readonly value="${esc(me.recoveryCode || '')}" placeholder="此设备尚无恢复码，请先生成" autocomplete="off" spellcheck="false">
+        <div class="button-row">
+          <button class="btn ghost small" id="s-recovery-copy" ${me.recoveryCode ? '' : 'disabled'}>复制恢复码</button>
+          <button class="btn ghost small" id="s-recovery-save" ${me.recoveryCode ? '' : 'disabled'}>保存恢复文件</button>
         </div>
-        <label>换手机？在另一台设备「加入房间」填这个房间码并选择认领</label>
-        <div style="font-size:13px;color:var(--sub);line-height:1.7">
-          房间码 <b style="color:var(--brand)">${room.code}</b> ·
-          你的角色 <b>${r === 'p1' ? 'P1 ' + P.p1.avatar : 'P2 ' + (P.p2 ? P.p2.avatar : '')}</b><br>
-          认领入口：加入时房间已满会提示认领，认领后旧设备自动失效。
+        <button class="btn plain small" id="s-recovery-reset" style="margin-top:12px">${me.recoveryCode ? '重置恢复码' : '生成个人恢复码'}</button>
+        <p class="hint">恢复会使原设备登录失效；重置后旧恢复码立即失效，请重新保存。拥有此码即可恢复你的身份，请私下妥善保管。${temporaryMode ? '<br>临时房间若已销毁，恢复码也无法找回房间或账本。' : ''}</p>
+        <h4>账本管理</h4>
+        <p class="hint">清空消费、还款明细和还款净额汇总，需要所有已加入的成员同意。</p>
+        <div class="button-row">
+          <button class="btn danger small" id="s-clear" ${ledgerBusy() || !hasRecords ? 'disabled' : ''}>提议清空账本</button>
+          <button class="btn plain small" id="s-leave">退出房间</button>
         </div>
+        <p class="hint">退出会清除本机身份。请先保存恢复码；「加入房间」只会创建新成员，不能找回原身份。</p>
         <button class="btn plain" id="s-close">关闭</button>
       </div>
     </div>`;
   let avatar = P[r].avatar;
+  const identity = me;
   const save = async () => {
     const name = document.getElementById('s-name').value.trim();
-    try { await api('/api/action', { code: me.code, token: me.token, type: 'setMe', name, avatar }); } catch (e) { toast(e.message); }
+    try { await api('/api/action', { code: identity.code, token: identity.token, type: 'setMe', name, avatar }); } catch (e) { toast(e.message); }
   };
   document.getElementById('s-name').addEventListener('change', save);
   $modal.querySelectorAll('#s-avs button').forEach((b) => b.addEventListener('click', () => {
     avatar = b.dataset.av;
-    $modal.querySelectorAll('#s-avs button').forEach((x) => x.classList.toggle('on', x === b));
+    $modal.querySelectorAll('#s-avs button').forEach((x) => {
+      x.classList.toggle('on', x === b); x.setAttribute('aria-pressed', String(x === b));
+    });
     save();
   }));
   $modal.querySelectorAll('#s-faces button').forEach((b) => b.addEventListener('click', () => {
-    const f = Number(b.dataset.faces);
-    const cur = room.faces || 6;
+    if (ledgerBusy()) return;
+    const f = Number(b.dataset.faces), cur = room.faces || 6;
     if (f === cur) return;
-    const setOn = (v) => $modal.querySelectorAll('#s-faces button').forEach((x) =>
-      x.classList.toggle('on', Number(x.dataset.faces) === v));
-    setOn(f); // 先亮再存，失败回滚（比如这一把还没掷完）
-    api('/api/action', { code: me.code, token: me.token, type: 'setFaces', faces: f })
+    const setOn = (v) => $modal.querySelectorAll('#s-faces button').forEach((x) => {
+      const selected = Number(x.dataset.faces) === v;
+      x.classList.toggle('on', selected); x.setAttribute('aria-pressed', String(selected));
+    });
+    setOn(f);
+    api('/api/action', { code: identity.code, token: identity.token, type: 'setFaces', faces: f })
       .catch((e) => { setOn(cur); toast(e.message); });
   }));
+  document.getElementById('s-recovery').addEventListener('click', (e) => e.currentTarget.select());
+  document.getElementById('s-recovery-copy').addEventListener('click', async () => {
+    try { await navigator.clipboard.writeText(identity.recoveryCode); toast('个人恢复码已复制，请私下保存'); }
+    catch (e) { document.getElementById('s-recovery')?.select(); toast('无法自动复制，请手动复制已选中的恢复码'); }
+  });
+  document.getElementById('s-recovery-save').addEventListener('click', () => {
+    const text = `骰子分账 · 个人恢复凭据（请保密）\n服务器：${location.origin}\n房间码：${identity.code}\n成员编号：${identity.role}\n恢复码：${identity.recoveryCode}\n\n在首页选择「恢复身份」，输入房间码与恢复码。恢复将使原设备登录失效。\n临时房间已销毁时无法恢复。重置恢复码后请更新此文件。\n`;
+    const url = URL.createObjectURL(new Blob([text], { type: 'text/plain;charset=utf-8' }));
+    const link = document.createElement('a');
+    link.href = url; link.download = `dice-split-${identity.code}-${identity.role}-recovery.txt`;
+    document.body.appendChild(link); link.click(); link.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+    toast('已请求下载，请确认保存恢复文件');
+  });
+  document.getElementById('s-recovery-reset').addEventListener('click', async (e) => {
+    if (identity.recoveryCode && !confirm('重置会立即作废旧恢复码。请在重置后重新复制或保存，继续吗？')) return;
+    const button = e.currentTarget;
+    button.disabled = true;
+    try {
+      const d = await api('/api/recovery', { code: identity.code, token: identity.token });
+      if (me !== identity) return;
+      me.recoveryCode = d.recoveryCode; saveMe();
+      renderRoom(); openSettings('s-recovery');
+      toast('恢复码已更新，请重新保存');
+    } catch (err) { button.disabled = false; toast(err.message); }
+  });
   document.getElementById('s-clear').addEventListener('click', function () {
-    if (!confirm('提议清空全部消费和还款记录？对方同意后余额归零，记录不可恢复。')) return;
+    if (ledgerBusy()) { toast('请等待当前分账或账本提议完成'); return; }
+    if (!confirm('提议清空全部消费、还款记录和还款净额汇总？所有成员同意后余额归零，记录不可恢复。')) return;
     this.disabled = true;
-    api('/api/action', { code: me.code, token: me.token, type: 'clearHistory' })
-      .then(() => { closeModal(); toast('清空提议已发送，等待对方同意'); })
+    api('/api/action', { code: identity.code, token: identity.token, type: 'clearHistory' })
+      .then(() => { closeModal(); toast('清空提议已发送，等待所有成员同意'); })
       .catch((e) => { this.disabled = false; toast(e.message); });
   });
   document.getElementById('s-leave').addEventListener('click', () => {
-    if (confirm(temporaryMode ? '当前未设置密码。最后一人退出后，房间和全部记录立即销毁，无法恢复。确定退出？' : '退出后账本还在房间里，重新加入可再看。确定退出？')) { closeModal(); leaveRoom(); }
+    const warning = '退出会清除本机身份，回到原成员必须使用已保存的个人恢复码。加入房间不会恢复原身份。'
+      + (!me.recoveryCode ? '你尚未生成恢复码，建议取消并先生成、保存。' : '请确认你已私下保存恢复码。')
+      + (temporaryMode ? '最后一人断开或服务重启会立即销毁临时房间；销毁后即使有恢复码也无法找回。' : '')
+      + '确定退出？';
+    if (confirm(warning)) leaveRoom();
   });
   document.getElementById('s-close').addEventListener('click', closeModal);
-  document.getElementById('mask').addEventListener('click', (e) => { if (e.target.id === 'mask') closeModal(); });
+  setupModal(initialFocus);
 }
 
-function closeModal() { $modal.innerHTML = ''; }
+let modalReturnFocus = '';
+function setupModal(initialFocus) {
+  if (!$modal.contains(document.activeElement) && document.activeElement?.id) modalReturnFocus = document.activeElement.id;
+  const mask = document.getElementById('mask');
+  mask.addEventListener('click', (e) => { if (e.target === mask) closeModal(); });
+  mask.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') { e.preventDefault(); closeModal(); }
+    if (e.key !== 'Tab') return;
+    const els = Array.from(mask.querySelectorAll('button:not(:disabled), input:not(:disabled), select:not(:disabled), [tabindex="0"]'));
+    if (!els.length) return;
+    const first = els[0], last = els[els.length - 1];
+    if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
+    else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+  });
+  const target = document.getElementById(initialFocus);
+  setTimeout(() => { if (target?.isConnected) target.focus(); }, 100);
+}
+function closeModal() {
+  $modal.innerHTML = '';
+  document.getElementById(modalReturnFocus)?.focus({ preventScroll: true });
+  modalReturnFocus = '';
+}
 
 /* ============ 主渲染 ============ */
 function render() {

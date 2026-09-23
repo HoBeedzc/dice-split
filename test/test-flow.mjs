@@ -10,7 +10,7 @@ import { isDeepStrictEqual as equal } from 'node:util';
 
 const ROOT = fileURLToPath(new URL('../', import.meta.url));
 
-// 供两个测试文件共用；import 本文件不会运行全流程测试。
+// 供 API 测试文件共用；import 本文件不会运行全流程测试。
 export async function deadline(promise, label, ms = 5000) {
   let timer;
   try {
@@ -108,7 +108,8 @@ export class TestServer {
         for (;;) {
           const { done, value } = await reader.read();
           if (done) {
-            if (!feed.closing) throw new Error('SSE 意外结束');
+            feed.ended = true;
+            if (!feed.closing && !feed.expectEnd) throw new Error('SSE 意外结束');
             return;
           }
           buffer += decoder.decode(value, { stream: true });
@@ -126,7 +127,10 @@ export class TestServer {
       } finally {
         reader.releaseLock();
       }
-    })().catch((error) => { if (!feed.closing) this.setFailure(error); });
+    })().catch((error) => {
+      if (feed.expectEnd && !feed.closing) feed.ended = true;
+      else if (!feed.closing) this.setFailure(error);
+    });
     await feed.wait(() => true, 'SSE 初始快照');
     return feed;
   }
@@ -196,6 +200,15 @@ class SnapshotFeed {
     }
   }
 
+  expectServerClose() { this.expectEnd = true; }
+
+  async waitForServerClose() {
+    await this.server.guard(this.task, '恢复身份必须关闭旧 SSE');
+    if (!this.ended || this.closing || this.controller.signal.aborted) {
+      throw new Error('旧 SSE 必须由服务端终止，不能由测试主动关闭');
+    }
+  }
+
   async close() {
     this.closing = true;
     this.controller.abort();
@@ -204,29 +217,42 @@ class SnapshotFeed {
   }
 }
 
+export function memberIds(room) {
+  return Object.keys(room.players).filter((id) => room.players[id]).sort((a, b) => Number(a.slice(1)) - Number(b.slice(1)));
+}
+
 export function persistentView(room, snapshot = false) {
   const bill = room.bill;
   return {
+    capacity: room.capacity,
     phase: room.phase,
     faces: room.faces,
-    players: Object.fromEntries(['p1', 'p2'].map((role) => [role, room.players[role] && {
+    players: Object.fromEntries(Object.keys(room.players).map((role) => [role, room.players[role] && {
       name: room.players[role].name, avatar: room.players[role].avatar,
     }])),
     bill: bill && {
       amountCents: bill.amountCents, note: bill.note, payer: bill.payer, faces: bill.faces,
+      participants: bill.participants, required: bill.required,
       rerolls: bill.rerolls, pending: bill.pending || null, confirms: bill.confirms,
-      rolled: snapshot ? bill.rolled : { p1: bill.rolls.p1 != null, p2: bill.rolls.p2 != null },
+      rolled: snapshot ? bill.rolled : Object.fromEntries(bill.participants.map((id) => [id, bill.rolls[id] != null])),
       ...(room.phase === 'result' ? { rolls: bill.rolls, ratio: bill.ratio, shares: bill.shares } : {}),
     },
     history: room.history, repayments: room.repayments, ledgerPending: room.ledgerPending,
+    repaymentCarry: room.temporaryMode === true ? room.repaymentCarry : undefined,
   };
 }
 
 export function expectedBalance(room) {
-  let p1 = room.temporaryMode === true ? room.repaymentCarryCents : 0;
-  for (const bill of room.history) p1 += bill.payer === 'p1' ? bill.shares.p2 : -bill.shares.p1;
-  for (const repayment of room.repayments) p1 += repayment.from === 'p1' ? repayment.amountCents : -repayment.amountCents;
-  return { p1, p2: p1 === 0 ? 0 : -p1 };
+  const balance = Object.fromEntries(memberIds(room).map((id) => [id, room.temporaryMode === true ? (room.repaymentCarry[id] ?? 0) : 0]));
+  for (const bill of room.history) {
+    balance[bill.payer] += bill.amountCents;
+    for (const [id, share] of Object.entries(bill.shares)) balance[id] -= share;
+  }
+  for (const repayment of room.repayments) {
+    balance[repayment.from] += repayment.amountCents;
+    balance[repayment.to] -= repayment.amountCents;
+  }
+  return balance;
 }
 
 export function hasRuntimeFields(value) {
@@ -371,7 +397,7 @@ async function runFlow() {
     for (const type of ['reroll', 'void']) {
       await change(p1, type); // 新提议不带 proposalId。
       const id = s.bill.pending.id;
-      ok(typeof id === 'string' && id.length > 0 && equal(s.bill.pending, { id, type, by: 'p1' }), `${type} 生成完整的带 ID 提议`);
+      ok(typeof id === 'string' && id.length > 0 && s.bill.pending.type === type && s.bill.pending.by === 'p1' && equal(s.bill.pending.required, ['p1', 'p2']) && s.bill.pending.approvals.p1 === true && !s.bill.pending.approvals.p2 && Object.keys(s.bill.pending.approvals).every((role) => ['p1', 'p2'].includes(role)), `${type} 生成带 ID、全员 required 和发起人自动同意的提议`);
       for (const proposalId of [undefined, 'wrong', null, [id]]) {
         const label = `${type} ID=${JSON.stringify(proposalId)}`;
         await rejected(p2, 'respond', { proposalId, approve: true }, `${label} 不能回应`);
@@ -451,7 +477,7 @@ async function runFlow() {
     ok(s.history[0].payer === 'p1' && s.history[0].note === '晚饭火锅', '保留垫付人和备注');
     const firstId = s.history[0].id;
     await change(p1, 'start', { amountCents: 5000, note: '奶茶', payer: 'p2' });
-    for (const [type, fields] of [['deleteHistory', { id: firstId }], ['clearHistory', {}], ['repay', { amountCents: 1 }], ['deleteRepayment', { id: 'missing' }]]) {
+    for (const [type, fields] of [['deleteHistory', { id: firstId }], ['clearHistory', {}], ['repay', { from: 'p2', to: 'p1', amountCents: 1 }], ['deleteRepayment', { id: 'missing' }]]) {
       await rejected(p1, type, fields, `${type} 在 rolling 阶段被拒`);
     }
     await change(p1, 'roll');
@@ -484,7 +510,7 @@ async function runFlow() {
       await rejected(p2, 'ledgerRespond', { proposalId: oldId, approve: approveValue }, `approve=${JSON.stringify(approveValue)} 不是 boolean`);
     }
     await rejected(p1, 'start', { amountCents: 100 }, '待处理账本提议冻结开账');
-    for (const [type, fields] of [['clearHistory', {}], ['deleteHistory', { id: firstId }], ['repay', { amountCents: 1 }], ['deleteRepayment', { id: 'missing' }]]) {
+    for (const [type, fields] of [['clearHistory', {}], ['deleteHistory', { id: firstId }], ['repay', { from: 'p2', to: 'p1', amountCents: 1 }], ['deleteRepayment', { id: 'missing' }]]) {
       await rejected(p2, type, fields, `已有账本提议时拒绝 ${type}`);
     }
     await change(p2, 'ledgerRespond', { proposalId: oldId, approve: false });
@@ -505,7 +531,7 @@ async function runFlow() {
     await approve(p2, deleteId);
     ok(s.history.length === 0 && s.ledgerPending === null && s.balance.p1 === 0, '双人同意后删除消费并重新计算余额');
     await rejected(p2, 'ledgerRespond', { proposalId: deleteId, approve: true }, '重复批准被拒');
-    await rejected(p1, 'repay', { amountCents: 1 }, '没有欠款不能还款');
+    await rejected(p1, 'repay', { from: 'p2', to: 'p1', amountCents: 1 }, '没有欠款不能还款');
 
     console.log('—— 金额边界 / 换面数 ——');
     for (const amountCents of [0, -1, 1000000001, 'not-money']) {
@@ -534,16 +560,23 @@ async function runFlow() {
     await change(p2, 'confirm');
     ok(s.history.length === 2 && s.history[0].faces === 8, '消费记录保存当时面数');
 
-    console.log('—— 换手机认领身份 ——');
-    await feed.close();
+    console.log('—— 换手机安全恢复身份 ——');
     const previousToken = p2.token;
-    const claim = await req('POST', '/api/join', { code: p1.code, name: '小猫新手机', claimRole: 'p2' });
-    must(claim.status === 200, '认领失败');
-    p2 = claim.data;
-    ok(p2.role === 'p2' && p2.token !== previousToken && room().players.p2.token === p2.token, '认领新 token 立即落盘');
+    const beforeRecovery = persistentView(s, true);
+    const recoveryCode = p2.recoveryCode;
+    must(typeof recoveryCode === 'string' && recoveryCode.length > 0, '加入必须返回私密恢复码');
+    const claim = await req('POST', '/api/join', { code: p1.code, name: '不能冒领', claimRole: 'p2' });
+    ok(claim.status >= 400 && claim.status < 500, '知道房间码和角色不能冒领身份');
+    feed.expectServerClose();
+    const recovered = await req('POST', '/api/recover', { code: p1.code, recoveryCode, name: '不能偷偷改名' });
+    must(recovered.status === 200, '恢复失败');
+    p2 = recovered.data;
+    ok(p2.role === 'p2' && p2.code === p1.code && p2.recoveryCode === recoveryCode && p2.token !== previousToken && room().players.p2.token === p2.token, '恢复保留角色及恢复码，新 token 响应前立即落盘');
+    await feed.waitForServerClose();
     ok((await req('GET', `/api/ping?code=${p1.code}&token=${previousToken}`)).status === 401, '旧 token 失效');
     feed = await server.observe(p1.code, p2.token, PASS);
     s = await feed.wait((snap) => snap.players.p2.online, '新身份上线');
+    ok(equal(persistentView(s, true), beforeRecovery), '恢复不改名字、账本或分账状态');
     await change(p2, 'setMe', { name: '小猫改名' });
     ok(room().players.p2.name === '小猫改名' && !hasRuntimeFields(disk()), '改名立即持久化，online/_conns 等运行时字段不落盘');
 
@@ -551,24 +584,24 @@ async function runFlow() {
     const debt = s.balance.p1;
     must(debt > 2, '测试消费应产生 P2 对 P1 的欠款');
     for (const amountCents of [undefined, null, 0, -1, 1.5, '1', true, Number.MAX_SAFE_INTEGER + 1, debt + 1]) {
-      await rejected(p1, 'repay', { amountCents }, `还款金额 ${JSON.stringify(amountCents)} 不合法`);
+      await rejected(p1, 'repay', { from: 'p2', to: 'p1', amountCents }, `还款金额 ${JSON.stringify(amountCents)} 不合法`);
     }
     const partial = Math.max(1, Math.floor(debt / 3));
     const beforeRepay = records();
-    await change(p1, 'repay', { amountCents: partial });
+    await change(p1, 'repay', { from: 'p2', to: 'p1', amountCents: partial });
     let proposal = s.ledgerPending;
-    ok(proposal.type === 'repay' && proposal.by === 'p1' && proposal.from === 'p2' && proposal.to === 'p1' && proposal.amountCents === partial, '应收方也能提议，付款方向由净额决定');
+    ok(proposal.type === 'repay' && proposal.by === 'p1' && proposal.from === 'p2' && proposal.to === 'p1' && proposal.amountCents === partial, '应收方也能提议，明确的付款方向符合净额');
     unchanged(beforeRepay, '还款提议未确认不改变记录或余额');
     await rejected(p1, 'ledgerRespond', { proposalId: proposal.id, approve: true }, '还款不能自行批准');
     await change(p2, 'ledgerRespond', { proposalId: proposal.id, approve: false });
     unchanged(beforeRepay, '拒绝还款不改账');
-    await change(p2, 'repay', { amountCents: partial });
+    await change(p2, 'repay', { from: 'p2', to: 'p1', amountCents: partial });
     proposal = s.ledgerPending;
     ok(proposal.by === 'p2' && proposal.from === 'p2' && proposal.to === 'p1', '欠款方也可发起且方向一致');
     await change(p2, 'ledgerWithdraw', { proposalId: proposal.id });
     unchanged(beforeRepay, '撤回还款不改账');
 
-    const concurrent = await Promise.all([act(p1, 'repay', { amountCents: 1 }), act(p2, 'clearHistory')]);
+    const concurrent = await Promise.all([act(p1, 'repay', { from: 'p2', to: 'p1', amountCents: 1 }), act(p2, 'clearHistory')]);
     ok(concurrent.filter((result) => result.status === 200).length === 1 && concurrent.filter((result) => result.status >= 400 && result.status < 500).length === 1, '并发提议只接受一个');
     const concurrentSaved = room();
     s = await feed.wait((snap) => equal(persistentView(snap, true), persistentView(concurrentSaved)), '并发提议最终状态');
@@ -578,8 +611,8 @@ async function runFlow() {
     await change(winner, 'ledgerWithdraw', { proposalId: s.ledgerPending.id });
 
     console.log('—— 原子写入失败 / 无幽灵状态 / 可重试 ——');
-    await failedWrite(p1, 'repay', { amountCents: partial }, '还款提议');
-    await change(p1, 'repay', { amountCents: partial });
+    await failedWrite(p1, 'repay', { from: 'p2', to: 'p1', amountCents: partial }, '还款提议');
+    await change(p1, 'repay', { from: 'p2', to: 'p1', amountCents: partial });
     proposal = s.ledgerPending;
     await failedWrite(p2, 'ledgerRespond', { proposalId: proposal.id, approve: true }, '还款确认');
     await approve(p2, proposal.id);
@@ -588,12 +621,12 @@ async function runFlow() {
     ok(equal(s.history, beforeRepay.history), '还款不改变消费及手气统计原始数据');
     ok(s.balance.p1 === debt - partial && s.balance.p2 === -(debt - partial), '还款只减少净欠款');
     await rejected(p2, 'ledgerRespond', { proposalId: proposal.id, approve: true }, '重复还款批准不产生第二条还款');
-    await change(p2, 'repay', { amountCents: s.balance.p1 });
+    await change(p2, 'repay', { from: 'p2', to: 'p1', amountCents: s.balance.p1 });
     const fullRepayId = s.ledgerPending.id;
     await rejected(p2, 'ledgerRespond', { proposalId: proposal.id, approve: true }, '上一笔迟到批准不影响新的还款');
     await approve(p1, fullRepayId);
     ok(s.balance.p1 === 0 && s.balance.p2 === 0 && s.repayments.length === 2, '全额还款归零');
-    await rejected(p2, 'repay', { amountCents: 1 }, '结清后不能继续还款');
+    await rejected(p2, 'repay', { from: 'p2', to: 'p1', amountCents: 1 }, '结清后不能继续还款');
 
     console.log('—— 双人删除还款 / 反向净欠款 ——');
     await rejected(p1, 'deleteRepayment', { id: 'missing' }, '不存在的还款不能删除');
@@ -613,7 +646,7 @@ async function runFlow() {
       // 使用真实消费/还款 ID 和合法还款金额，避免因参数无效而假阳性。
       for (const [type, fields] of [
         ['deleteHistory', { id: s.history[0].id }], ['clearHistory', {}],
-        ['deleteRepayment', { id: s.repayments[0].id }], ['repay', { amountCents: 1 }],
+        ['deleteRepayment', { id: s.repayments[0].id }], ['repay', { from: 'p2', to: 'p1', amountCents: 1 }],
       ]) {
         await rejected(p2, type, fields, `${phase} 阶段拒绝合法参数的 ${type} 提议`);
       }
@@ -626,8 +659,8 @@ async function runFlow() {
     await change(p2, 'confirm');
     must(s.balance.p1 < -100, '反向垫付应使 P1 成为欠款方');
     const reverseBefore = records();
-    await change(p2, 'repay', { amountCents: 100 });
-    ok(s.ledgerPending.from === 'p1' && s.ledgerPending.to === 'p2', '反向净额自动确定 P1 付款给 P2');
+    await change(p2, 'repay', { from: 'p1', to: 'p2', amountCents: 100 });
+    ok(s.ledgerPending.from === 'p1' && s.ledgerPending.to === 'p2', '反向净额允许明确指定 P1 付款给 P2');
     await approve(p1, s.ledgerPending.id);
     ok(s.balance.p1 === reverseBefore.balance.p1 + 100 && equal(s.history, reverseBefore.history), '反向还款正确抵扣且不改变消费/手气');
 
@@ -642,7 +675,7 @@ async function runFlow() {
     server = new TestServer(dataFile, { PASSCODE: PASS });
     instances.push(server);
     await server.start();
-    ok((await req('GET', `/api/ping?code=${p1.code}&token=${p2.token}`)).status === 200, '重启恢复认领后的身份');
+    ok((await req('GET', `/api/ping?code=${p1.code}&token=${p2.token}`)).status === 200, '重启恢复换机后的身份');
     feed = await server.observe(p1.code, p2.token, PASS);
     s = await feed.wait((snap) => snap.players.p2.online, '重启 SSE');
     contracts(s);
