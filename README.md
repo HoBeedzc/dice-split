@@ -128,6 +128,24 @@ pm2 logs dice-split --lines 50 --nostream
 - **未设置或设置为空**：启用临时模式，不读写账本；最后一人断开或进程重启后，房间与记录会消失。PM2 不会让临时模式的数据变成持久化数据，公网部署不要使用此模式。
 - 本应用不会自动加载 `.env` 文件，环境变量须在启动时传入。不要把真实口令提交到仓库，也不要分享包含口令的终端历史或 PM2 进程备份文件（默认位于 `~/.pm2`）。
 
+**使用配置文件启动**：如果更习惯用配置文件管理，在项目目录创建 `ecosystem.config.js`（不要提交到仓库）：
+
+```js
+module.exports = {
+  apps: [{
+    name: 'dice-split',
+    script: 'server.js',
+    time: true,
+    env: {
+      PORT: 8787,
+      PASSCODE: '替换为足够长的随机口令',
+    },
+  }],
+};
+```
+
+然后执行 `pm2 start ecosystem.config.js` 即可。修改口令或端口后，用 `pm2 restart ecosystem.config.js --update-env` 并重新 `pm2 save`。
+
 ### 3. 配置开机自启
 
 ```bash
