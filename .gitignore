@@ -1,0 +1,7 @@
+.DS_Store
+node_modules/
+.env
+.env.*
+*.log
+/dice-split-data.json
+/dice-split-data.json.tmp-*

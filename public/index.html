@@ -1,0 +1,925 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="theme-color" content="#FF6B6B">
+<meta name="dice-split-temporary" content="__TEMPORARY_MODE__">
+<title>骰子分账 🎲</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🎲</text></svg>">
+<style>
+  :root {
+    --bg: #FBF6EF;
+    --card: #FFFFFF;
+    --ink: #3D3229;
+    --sub: #9C8E80;
+    --brand: #FF6B6B;
+    --brand2: #FF8E53;
+    --mint: #35B8A6;
+    --line: #F0E7DB;
+    --danger: #E25555;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+  html { font-size: 16px; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Noto Sans SC", "Microsoft YaHei", sans-serif;
+    background: var(--bg); color: var(--ink);
+    min-height: 100vh; min-height: 100dvh;
+  }
+  #app { max-width: 430px; margin: 0 auto; padding: 16px 16px calc(28px + env(safe-area-inset-bottom)); }
+
+  .logo { text-align: center; padding: 40px 0 8px; }
+  .logo .big { font-size: 64px; display: block; animation: wobble 3.2s ease-in-out infinite; }
+  @keyframes wobble { 0%,100% { transform: rotate(-8deg); } 50% { transform: rotate(8deg); } }
+  .logo h1 { font-size: 26px; letter-spacing: 2px; margin-top: 8px; }
+  .logo p { color: var(--sub); font-size: 14px; margin-top: 6px; }
+
+  .card { background: var(--card); border-radius: 20px; padding: 20px; box-shadow: 0 4px 20px rgba(90,60,30,.06); margin-top: 16px; }
+  .temporary-notice { margin-top: 16px; padding: 14px 16px; border: 1px solid #EDC498; border-left: 4px solid #B86B29;
+    border-radius: 14px; background: #FFF3DF; color: #74451F; font-size: 12px; line-height: 1.7; }
+  .temporary-notice strong { display: block; font-size: 14px; margin-bottom: 4px; }
+  .tabs { display: flex; background: #F4EDE2; border-radius: 14px; padding: 4px; margin-bottom: 16px; }
+  .tabs button { flex: 1; border: 0; background: transparent; padding: 10px; border-radius: 11px; font-size: 15px; font-weight: 600; color: var(--sub); }
+  .tabs button.on { background: #fff; color: var(--ink); box-shadow: 0 2px 8px rgba(0,0,0,.08); }
+
+  label { display: block; font-size: 13px; color: var(--sub); margin: 14px 2px 6px; font-weight: 600; }
+  input[type=text], input[type=tel] {
+    width: 100%; border: 2px solid var(--line); border-radius: 14px; padding: 13px 14px;
+    font-size: 17px; background: #FFFDF9; color: var(--ink); outline: none; transition: border-color .15s;
+  }
+  input:focus { border-color: var(--brand); }
+
+  .avatars { display: flex; gap: 6px; flex-wrap: wrap; }
+  .avatars button {
+    width: 44px; height: 44px; font-size: 24px; border-radius: 14px; border: 2px solid transparent;
+    background: #F7F1E8; cursor: pointer; transition: all .12s;
+  }
+  .avatars button.on { border-color: var(--brand); background: #FFEFEA; transform: scale(1.08); }
+
+  .btn {
+    display: block; width: 100%; border: 0; border-radius: 16px; padding: 15px;
+    font-size: 17px; font-weight: 700; cursor: pointer; color: #fff; margin-top: 18px;
+    background: linear-gradient(135deg, var(--brand), var(--brand2));
+    box-shadow: 0 6px 16px rgba(255,107,107,.35); transition: transform .1s, opacity .15s;
+  }
+  .btn:active { transform: scale(.97); }
+  .btn[disabled] { opacity: .45; box-shadow: none; }
+  .btn.ghost { background: #fff; color: var(--brand); border: 2px solid var(--brand); box-shadow: none; }
+  .btn.plain { background: #F1E9DD; color: var(--sub); box-shadow: none; }
+  .btn.danger { background: #fff; color: var(--danger); border: 2px solid var(--danger); box-shadow: none; }
+  .btn.small { padding: 10px 14px; font-size: 14px; width: auto; margin-top: 0; border-radius: 12px; }
+
+  /* ---- 房间页 ---- */
+  .topbar { display: flex; align-items: center; justify-content: space-between; padding-top: 6px; }
+  .topbar .title { font-size: 20px; font-weight: 800; }
+  .iconbtn { border: 0; background: #fff; width: 40px; height: 40px; border-radius: 13px; font-size: 19px;
+    box-shadow: 0 3px 10px rgba(90,60,30,.08); cursor: pointer; }
+
+  .roomcard { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+  .code { font-size: 24px; font-weight: 800; letter-spacing: 4px; color: var(--brand); }
+  .players { display: flex; gap: 8px; }
+  .player { text-align: center; min-width: 64px; }
+  .player .face { font-size: 34px; position: relative; }
+  .player .dot { position: absolute; right: 2px; bottom: 2px; width: 10px; height: 10px; border-radius: 50%;
+    border: 2px solid #fff; background: #CCC; }
+  .player .dot.on { background: #4CD964; }
+  .player .name { font-size: 12px; color: var(--sub); margin-top: 3px; max-width: 72px; overflow: hidden;
+    text-overflow: ellipsis; white-space: nowrap; }
+  .vs { color: var(--sub); font-size: 13px; font-weight: 700; align-self: center; margin-top: -14px; }
+
+  .settle { text-align: center; padding: 18px 16px; }
+  .settle .k { font-size: 13px; color: var(--sub); font-weight: 600; }
+  .settle .v { font-size: 30px; font-weight: 800; margin-top: 6px; }
+  .settle .v.in { color: var(--mint); }
+  .settle .v.out { color: var(--brand); }
+  .settle .sub { font-size: 13px; color: var(--sub); margin-top: 6px; line-height: 1.5; }
+  .stats { display: flex; border-top: 1px dashed var(--line); margin-top: 14px; padding-top: 14px; }
+  .stats > div { flex: 1; text-align: center; }
+  .stats .n { font-size: 17px; font-weight: 800; }
+  .stats .l { font-size: 11px; color: var(--sub); margin-top: 3px; }
+
+  .empty { text-align: center; color: var(--sub); font-size: 14px; padding: 10px 0 4px; line-height: 1.7; }
+
+  /* ---- 掷骰区 ---- */
+  .billhead { text-align: center; }
+  .billhead .amt { font-size: 40px; font-weight: 800; }
+  .billhead .note { color: var(--sub); font-size: 14px; margin-top: 4px; }
+  .hint { text-align: center; color: var(--sub); font-size: 13px; margin-top: 10px; }
+
+  .dicezone { display: flex; align-items: stretch; justify-content: center; gap: 14px; margin-top: 16px; }
+  .diebox { flex: 1; max-width: 150px; text-align: center; background: #FFF9F1; border: 2px dashed var(--line);
+    border-radius: 18px; padding: 14px 8px; }
+  .diebox .die { font-size: 58px; line-height: 1.15; min-height: 66px; }
+  .diebox .who { font-size: 12px; color: var(--sub); font-weight: 600; }
+  .diebox.rolled-ok { border-style: solid; border-color: #FFD9CC; background: #FFF3EC; }
+  .die.rolling { animation: shake .28s linear infinite; }
+  @keyframes shake { 0%{transform:rotate(-14deg) scale(1.04)} 50%{transform:rotate(14deg) scale(1.12)} 100%{transform:rotate(-14deg) scale(1.04)} }
+  .die.pop { animation: pop .5s cubic-bezier(.2,1.6,.4,1); }
+  @keyframes pop { 0%{transform:scale(.2) rotate(-30deg); opacity:0} 100%{transform:scale(1) rotate(0); opacity:1} }
+  /* 超过 6 点（8/10/12/20 面骰）没有 Unicode 骰面，用数字方片表示 */
+  .dnum { display: inline-flex; align-items: center; justify-content: center; width: 62px; height: 62px;
+    border: 4px solid var(--ink); border-radius: 14px; font-size: 28px; font-weight: 800; vertical-align: middle; }
+  .hitem .dice .dnum { width: 20px; height: 20px; border-width: 2px; border-radius: 5px; font-size: 11px; }
+
+  .ratio { text-align: center; font-size: 34px; font-weight: 800; margin-top: 14px; letter-spacing: 1px; }
+  .ratio .av { font-size: 22px; }
+  .shares { display: flex; gap: 10px; margin-top: 12px; }
+  .shares > div { flex: 1; text-align: center; border-radius: 16px; padding: 12px 6px; }
+  .shares .s1 { background: #FFF3EC; }
+  .shares .s2 { background: #EAF7F4; }
+  .shares .m { font-size: 22px; font-weight: 800; margin-top: 2px; }
+
+  .confirmline { text-align: center; font-size: 13px; color: var(--sub); margin-top: 12px; min-height: 18px; }
+  .confirmline b.ok { color: var(--mint); }
+
+  /* ---- 历史 ---- */
+  .h2 { font-size: 16px; font-weight: 800; margin: 26px 4px 10px; display: flex; justify-content: space-between; align-items: center; }
+  .h2 span { font-size: 12px; color: var(--sub); font-weight: 500; }
+  .hitem { display: flex; align-items: center; gap: 12px; padding: 13px 14px; }
+  .hitem .dice { font-size: 20px; letter-spacing: 1px; }
+  .hitem .mid { flex: 1; min-width: 0; }
+  .hitem .t { font-size: 15px; font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .hitem .d { font-size: 12px; color: var(--sub); margin-top: 2px; }
+  .hitem .right { text-align: right; }
+  .hitem .sum { font-size: 16px; font-weight: 800; }
+  .hitem .mine { font-size: 12px; color: var(--sub); margin-top: 2px; }
+  .hitem .del { border: 0; background: none; color: #9C8E80; font-size: 15px; padding: 12px; cursor: pointer; }
+  .hitem .del:disabled { opacity: .35; cursor: default; }
+  .ledger-request { border: 2px solid #FFD9CC; }
+  .ledger-request h3 { font-size: 17px; }
+  .ledger-request p { font-size: 14px; color: var(--sub); line-height: 1.7; margin-top: 8px; overflow-wrap: anywhere; }
+  .repayment-tag { color: var(--mint); background: #EAF7F4; border-radius: 12px; padding: 12px 8px; font-size: 13px; font-weight: 700; }
+  .rr { display: inline-block; font-size: 10px; background: #F4EDE2; color: var(--sub); border-radius: 6px; padding: 1px 5px; margin-left: 5px; }
+
+  /* ---- 模态 / toast ---- */
+  #modal-root:empty { display: none; }
+  .mask { position: fixed; inset: 0; background: rgba(61,50,41,.45); z-index: 50; display: flex;
+    align-items: flex-end; justify-content: center; animation: fade .18s; }
+  @keyframes fade { from { opacity: 0; } }
+  .sheet { background: var(--bg); width: 100%; max-width: 430px; max-height: 90dvh; overflow-y: auto; border-radius: 24px 24px 0 0;
+    padding: 20px 18px calc(24px + env(safe-area-inset-bottom)); animation: up .22s cubic-bezier(.2,.9,.3,1); }
+  @keyframes up { from { transform: translateY(60%); } }
+  .sheet h3 { text-align: center; font-size: 17px; margin-bottom: 4px; }
+  .sheet .x { position: absolute; }
+  .amt-input { display: flex; align-items: baseline; justify-content: center; gap: 6px; margin: 10px 0 2px; }
+  .amt-input input { border: 0; background: transparent; text-align: center; font-size: 48px; font-weight: 800;
+    width: 100%; outline: none; color: var(--ink); }
+  .amt-input .yen { font-size: 26px; font-weight: 800; color: var(--brand); }
+  .chips { display: flex; gap: 8px; }
+  #s-faces { display: grid; grid-template-columns: repeat(3, 1fr); }
+  .chips button { flex: 1; border: 2px solid var(--line); background: #fff; border-radius: 14px; padding: 11px;
+    font-size: 15px; font-weight: 700; color: var(--sub); cursor: pointer; }
+  .chips button.on { border-color: var(--brand); color: var(--brand); background: #FFF3EC; }
+  .sheet .btn { margin-top: 16px; }
+
+  #toast { position: fixed; left: 50%; bottom: 88px; transform: translateX(-50%); z-index: 99;
+    background: rgba(61,50,41,.92); color: #fff; font-size: 14px; padding: 10px 18px; border-radius: 999px;
+    opacity: 0; pointer-events: none; transition: opacity .25s; max-width: 80vw; text-align: center; }
+  #toast.show { opacity: 1; }
+
+  .fadein { animation: fadein .25s ease; }
+  @keyframes fadein { from { opacity: 0; transform: translateY(8px); } }
+</style>
+</head>
+<body>
+<div id="app"></div>
+<div id="modal-root"></div>
+<div id="toast"></div>
+
+<script>
+'use strict';
+/* ============ 基础状态 ============ */
+const AVATARS = ['🐻','🐱','🐼','🦊','🐯','🐨','🐰','🦁','🐸','🐷'];
+const $app = document.getElementById('app');
+const $modal = document.getElementById('modal-root');
+let temporaryMode = document.querySelector('meta[name="dice-split-temporary"]').content === 'true';
+const staleMessage = () => temporaryMode ? '临时房间已销毁或身份已失效，请重新开房或加入' : '身份已失效，请重新进入房间';
+function temporaryNotice() {
+  return temporaryMode ? `<aside class="temporary-notice" role="note" aria-label="无密码临时模式提示">
+    <strong>目前未设置密码 · 临时模式</strong>
+    房间内容仅在内存中，不保存到磁盘。最后一人断开或服务重启后，房间及全部记录立即销毁。<br>
+    分账仅留最近一笔，新分账替换旧分账及其还款；还款明细只留最新一条，当前分账已还金额仍累计。<br>
+    独自刷新或关闭页面也可能销毁房间。公网使用仍建议设置密码。
+  </aside>` : '';
+}
+
+const ME_KEY = 'dice-split-me';
+let me = null;            // { code, token, role }
+try { me = JSON.parse(localStorage.getItem(ME_KEY) || 'null'); } catch (e) { me = null; }
+let room = null;          // 服务器快照
+let es = null;            // EventSource
+let connectAttempt = 0;
+let connectTimer = null;
+let rollAnimUntil = 0;    // 本地掷骰动画截止时间
+let animTimer = null;
+let myLocalRoll = null;   // rolling 阶段自己的点数（服务器只发响应给本人，不进广播）
+let lastPhaseKey = '';    // 用于识别"新一笔开始"，避免误关正在输入的弹层
+
+// URL 认领: #t=<token>&c=<CODE> —— 换手机 / 测试用
+(function readHash() {
+  const h = location.hash.slice(1);
+  if (!h) return;
+  const q = new URLSearchParams(h.includes('=') ? h : 'c=' + h);
+  const t = q.get('t'), c = (q.get('c') || '').toUpperCase();
+  if (t && c && q.get('r')) {
+    me = { code: c, token: t, role: q.get('r') };
+    localStorage.setItem(ME_KEY, JSON.stringify(me));
+    history.replaceState(null, '', location.pathname);
+  } else if (c && !t) {
+    window.__presetCode = c; // 邀请链接，仅预填房间码
+  }
+})();
+
+function saveMe() { localStorage.setItem(ME_KEY, JSON.stringify(me)); }
+function toast(msg) {
+  const el = document.getElementById('toast');
+  el.textContent = msg; el.classList.add('show');
+  clearTimeout(toast._t); toast._t = setTimeout(() => el.classList.remove('show'), 2200);
+}
+const fmt = (cents) => (cents / 100).toLocaleString('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (m) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
+let passcode = localStorage.getItem('dice-split-pass') || '';
+
+// 口令弹窗：服务端要求口令时出现，输入后自动重试原请求
+function askPasscode() {
+  return new Promise((resolve) => {
+    $modal.innerHTML = `
+      <div class="mask" id="mask">
+        <div class="sheet">
+          <h3>🔒 这台服务器设置了口令</h3>
+          <p style="text-align:center;color:var(--sub);font-size:13px;margin:6px 0 4px">问搭子或服务器主人要口令</p>
+          <input type="text" id="pc-input" placeholder="输入口令" style="text-align:center" autocomplete="off">
+          <button class="btn" id="pc-go">确定</button>
+        </div>
+      </div>`;
+    const input = document.getElementById('pc-input');
+    setTimeout(() => input.focus(), 200);
+    const done = () => {
+      passcode = input.value.trim();
+      localStorage.setItem('dice-split-pass', passcode);
+      $modal.innerHTML = '';
+      resolve(passcode);
+    };
+    document.getElementById('pc-go').addEventListener('click', done);
+    input.addEventListener('keydown', (e) => { if (e.key === 'Enter') done(); });
+  });
+}
+
+async function api(path, body) {
+  const r = await fetch(path, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ ...(body || {}), passcode }),
+  });
+  const data = await r.json().catch(() => ({}));
+  if (r.status === 401 && data.error === 'need-passcode') {
+    const pc = await askPasscode();
+    if (!pc) throw new Error('需要口令才能使用');
+    return api(path, body);
+  }
+  if (!r.ok) {
+    if (data.error === 'stale') { leaveRoom(staleMessage()); throw new Error(staleMessage()); }
+    throw new Error(data.error || '请求失败');
+  }
+  return data;
+}
+
+/* ============ SSE ============ */
+async function connect(retryDelay = 1000) {
+  const attempt = ++connectAttempt;
+  clearTimeout(connectTimer);
+  if (es) { es.close(); es = null; }
+  if (!me) return;
+  const retry = (message) => {
+    if (attempt !== connectAttempt) return;
+    toast(message);
+    connectTimer = setTimeout(() => connect(Math.min(retryDelay * 2, 30000)), retryDelay);
+  };
+  const qs = `code=${encodeURIComponent(me.code)}&token=${encodeURIComponent(me.token)}&passcode=${encodeURIComponent(passcode)}`;
+  try {
+    const ping = await fetch(`/api/ping?${qs}`, { signal: AbortSignal.timeout(10000) });
+    if (attempt !== connectAttempt) return;
+    if (!ping.ok) {
+      const d = await ping.json().catch(() => ({}));
+      if (attempt !== connectAttempt) return;
+      if (ping.status === 401 && d.error === 'stale') { leaveRoom(staleMessage()); return; }
+      if (ping.status === 401 && d.error === 'need-passcode') {
+        const pc = await askPasscode();
+        if (attempt !== connectAttempt) return;
+        if (pc) return connect();
+        leaveRoom(); return;
+      }
+      retry(ping.status === 429 ? '请求太频繁，正在稍后自动重试' : '连接暂不可用，正在自动重试');
+      return;
+    }
+  } catch (e) {
+    retry('网络暂不可用，正在自动重试');
+    return;
+  }
+  const stream = es = new EventSource(`/events?${qs}`);
+  stream.onmessage = (ev) => {
+    if (es !== stream) return;
+    const snap = JSON.parse(ev.data);
+    if (snap.error === 'stale') { leaveRoom(staleMessage()); return; }
+    room = snap;
+    temporaryMode = snap.temporaryMode;
+    // 掷骰进行中且自己尚未掷（新的一笔 / 被重掷），清掉本地暂存点数
+    if (room.phase === 'rolling' && room.bill && !room.bill.rolled[me.role]) myLocalRoll = null;
+    render();
+  };
+  stream.onerror = async () => {
+    try {
+      const response = await fetch(`/api/ping?${qs}`, { signal: AbortSignal.timeout(10000) });
+      const data = await response.json();
+      if (es === stream && response.status === 401 && data.error === 'stale') leaveRoom(staleMessage());
+    } catch (e) { /* 网络恢复后仍由 EventSource 自动重连。 */ }
+  };
+}
+function leaveRoom(msg) {
+  connectAttempt++;
+  clearTimeout(connectTimer);
+  if (es) { es.close(); es = null; }
+  me = null; room = null;
+  myLocalRoll = null;
+  rollAnimUntil = 0;
+  clearTimeout(animTimer);
+  lastPhaseKey = '';
+  closeModal();
+  localStorage.removeItem(ME_KEY);
+  render();
+  if (msg) toast(msg);
+}
+
+/* ============ 首页 ============ */
+let homeTab = 'create';
+let homeForm = { name: '', avatar: '🐻', code: '' };
+
+function renderHome() {
+  if (window.__presetCode) { homeForm.code = window.__presetCode; homeTab = 'join'; }
+  const f = homeForm;
+  $app.innerHTML = `
+    <div class="logo fadein">
+      <span class="big">🎲</span>
+      <h1>骰子分账</h1>
+      <p>谁多付一点？让骰子说了算</p>
+    </div>
+    ${temporaryNotice()}
+    <div class="card fadein">
+      <div class="tabs">
+        <button class="${homeTab === 'create' ? 'on' : ''}" data-tab="create">开个房间</button>
+        <button class="${homeTab === 'join' ? 'on' : ''}" data-tab="join">加入房间</button>
+      </div>
+      <label>我的昵称</label>
+      <input type="text" id="f-name" maxlength="12" placeholder="怎么称呼你？" value="${esc(f.name)}">
+      <label>选个头像</label>
+      <div class="avatars">${AVATARS.map((a) =>
+        `<button data-av="${a}" class="${f.avatar === a ? 'on' : ''}">${a}</button>`).join('')}</div>
+      ${homeTab === 'join' ? `
+        <label>房间码</label>
+        <input type="text" id="f-code" maxlength="5" placeholder="对方告诉你的 5 位码" value="${esc(f.code)}"
+          style="text-transform:uppercase; letter-spacing:5px; font-weight:800; text-align:center;">` : ''}
+      <button class="btn" id="f-go">${homeTab === 'create' ? '🎲 开个房间' : '🚪 加入房间'}</button>
+      <p style="text-align:center;color:var(--sub);font-size:12px;margin-top:12px;">
+        只记账，不碰钱 · ${temporaryMode ? '临时记录，不保存到磁盘' : '记录存在你们自己的电脑/服务器上'}</p>
+    </div>`;
+
+  $app.querySelector('#f-name').addEventListener('input', (e) => { homeForm.name = e.target.value; });
+  const codeEl = $app.querySelector('#f-code');
+  if (codeEl) codeEl.addEventListener('input', (e) => { homeForm.code = e.target.value.toUpperCase(); });
+  $app.querySelectorAll('.avatars button').forEach((b) => b.addEventListener('click', () => {
+    homeForm.avatar = b.dataset.av; renderHome();
+  }));
+  $app.querySelectorAll('.tabs button').forEach((b) => b.addEventListener('click', () => {
+    homeTab = b.dataset.tab; renderHome();
+  }));
+  $app.querySelector('#f-go').addEventListener('click', async () => {
+    const name = homeForm.name.trim() || (homeTab === 'create' ? '玩家1' : '玩家2');
+    try {
+      const d = homeTab === 'create'
+        ? await api('/api/create', { name, avatar: homeForm.avatar })
+        : await api('/api/join', { name, avatar: homeForm.avatar, code: homeForm.code.trim() });
+      me = d; saveMe(); connect();
+    } catch (e) {
+      if (e.message === 'full') openClaimSheet(); else toast(e.message);
+    }
+  });
+  window.__presetCode = null;
+}
+
+// 房间已满：换手机/接管身份的认领入口
+function openClaimSheet() {
+  $modal.innerHTML = `
+    <div class="mask" id="mask">
+      <div class="sheet">
+        <h3>这个房间已经有两个人啦</h3>
+        <p style="text-align:center;color:var(--sub);font-size:13px;line-height:1.7;margin-top:6px">
+          如果是你换手机（或其中一台设备不用了），<br>可以认领对应身份，认领后旧设备会自动退出。</p>
+        <button class="btn" id="c-p1">认领 P1（${esc(roomP1Name())}）</button>
+        <button class="btn" id="c-p2" style="margin-top:10px">认领 P2（${esc(roomP2Name())}）</button>
+        <button class="btn plain" id="c-cancel" style="margin-top:10px">点错了，取消</button>
+      </div>
+    </div>`;
+  const doClaim = async (role) => {
+    try {
+      const d = await api('/api/join', {
+        name: homeForm.name.trim() || undefined, avatar: homeForm.avatar,
+        code: homeForm.code.trim(), claimRole: role,
+      });
+      me = d; saveMe(); connect();
+      $modal.innerHTML = '';
+    } catch (e) { toast(e.message); }
+  };
+  document.getElementById('c-p1').addEventListener('click', () => doClaim('p1'));
+  document.getElementById('c-p2').addEventListener('click', () => doClaim('p2'));
+  document.getElementById('c-cancel').addEventListener('click', () => { $modal.innerHTML = ''; });
+  document.getElementById('mask').addEventListener('click', (e) => { if (e.target.id === 'mask') $modal.innerHTML = ''; });
+}
+function roomP1Name() {
+  const code = homeForm.code.trim();
+  const known = room && room.code === code ? room.players.p1 : null;
+  return known ? known.avatar + ' ' + known.name : '原房主';
+}
+function roomP2Name() {
+  const code = homeForm.code.trim();
+  const known = room && room.code === code ? room.players.p2 : null;
+  return known ? known.avatar + ' ' + known.name : '另一位';
+}
+
+/* ============ 房间页 ============ */
+function myRole() { return me && me.role; }
+function otherRole() { return me.role === 'p1' ? 'p2' : 'p1'; }
+function ph(p) { return p ? p.avatar + ' ' + esc(p.name) : '待加入'; }
+// 1–6 点用骰面字符，更多点数（8/12/20 面骰）用数字骰面
+function dieGlyph(n) { return n <= 6 ? '⚀⚁⚂⚃⚄⚅'[n - 1] : `<span class="dnum">${n}</span>`; }
+
+// 从历史派生统计（单位: 分）
+function calcStats() {
+  let total = 0, paidMe = 0, shareMe = 0, luck2 = 0, n = room.history.length;
+  const r = myRole(), o = otherRole();
+  for (const h of room.history) {
+    total += h.amountCents;
+    if (h.payer === r) paidMe += h.amountCents;
+    shareMe += h.shares[r];
+    luck2 += 2 * h.shares[r] - h.amountCents;
+  }
+  return { total, paidMe, shareMe, luck: luck2 / 2, n, net: room.balance[r] };
+}
+
+function fmtTime(ts) {
+  const d = new Date(ts), now = new Date();
+  const hm = `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+  const sameDay = d.toDateString() === now.toDateString();
+  if (sameDay) return `今天 ${hm}`;
+  const y = new Date(now); y.setDate(now.getDate() - 1);
+  if (d.toDateString() === y.toDateString()) return `昨天 ${hm}`;
+  return `${d.getMonth() + 1}月${d.getDate()}日 ${hm}`;
+}
+
+function renderRoom() {
+  const r = myRole(), o = otherRole();
+  const P = room.players, meP = P[r], otherP = P[o];
+  // 服务端的 ratio/shares 按 p1 在前存储；展示统一按「我在前」的视角，与掷骰区（我）在左一致
+  const myIx = r === 'p1' ? 0 : 1;
+  const st = calcStats();
+  const net = st.net;
+  const waitingP2 = !P.p2;
+  const ledgerBusy = room.phase !== 'idle' || !!room.ledgerPending;
+
+  /* 结算卡 */
+  let settleV, settleCls, settleK;
+  if (!st.n && !room.repayments.length) { settleK = '还没记过账'; settleV = '先掷一把试试 🎲'; settleCls = ''; }
+  else if (net === 0) { settleK = '目前两清'; settleV = '刚好打平 ✨'; settleCls = ''; }
+  else if (net > 0) { settleK = `${otherP ? otherP.avatar : ''} 应该给你`; settleV = '¥ ' + fmt(net); settleCls = 'in'; }
+  else { settleK = `你应该给 ${otherP ? otherP.avatar : ''}`; settleV = '¥ ' + fmt(-net); settleCls = 'out'; }
+
+  /* 进行中的一笔 */
+  let billHtml = '';
+  if (room.phase === 'rolling' || room.phase === 'result') {
+    const b = room.bill;
+    const now = Date.now();
+    const animating = now < rollAnimUntil;
+
+    // 掷骰格子
+    const dieFace = (role) => {
+      if (room.phase === 'result') {
+        return `<div class="die pop">${dieGlyph(b.rolls[role])}</div>`;
+      }
+      if (role === r) {
+        if (animating) return `<div class="die rolling">🎲</div>`;
+        if (myLocalRoll) return `<div class="die pop">${dieGlyph(myLocalRoll)}</div>`;
+        if (b.rolled[role]) return `<div class="die" style="font-size:22px;display:grid;place-items:center">已掷</div>`;
+        return `<div class="die">🎲</div>`;
+      }
+      if (b.rolled && b.rolled[role]) return `<div class="die">🔒</div>`;
+      return `<div class="die">🎲</div>`;
+    };
+    const boxCls = (role) => ((role === r && myLocalRoll && !animating) || room.phase === 'result') ? 'rolled-ok' : '';
+    const whoLabel = (role) => role === r ? esc(meP.name) + '（我）' : esc(otherP ? otherP.name : '对方');
+
+    const diceHtml = `
+      <div class="dicezone">
+        <div class="diebox ${boxCls(r)}"><div class="who">${whoLabel(r)}</div>${dieFace(r)}</div>
+        <div class="diebox ${boxCls(o)}"><div class="who">${whoLabel(o)}</div>${dieFace(o)}</div>
+      </div>`;
+
+    if (room.phase === 'rolling') {
+      let actionHtml, voidBtn;
+      const pd = b.pending;
+      if (pd && pd.by === r) {
+        actionHtml = `<button class="btn" disabled>⏳ 你提议作废这笔 · 等 ${esc(otherP ? otherP.name : '对方')} 同意</button>
+          <button class="btn plain" id="a-withdraw" style="margin-top:10px">撤回提议</button>`;
+        voidBtn = '';
+      } else if (pd) {
+        actionHtml = `<div class="confirmline">${esc(otherP ? otherP.name : '对方')} 提议作废这笔</div>
+          <button class="btn" id="a-approve">✅ 同意作废</button>
+          <button class="btn ghost" id="a-reject" style="margin-top:10px">🙅 不同意，继续掷</button>`;
+        voidBtn = '';
+      } else {
+        if (animating) actionHtml = `<button class="btn" disabled>骰子滚动中…</button>`;
+        else if (!b.rolled[r]) actionHtml = `<button class="btn" id="a-roll">🎲 掷！</button>`;
+        else actionHtml = `<button class="btn" disabled>${myLocalRoll ? `我掷出了 ${myLocalRoll} 点` : '我已掷骰'} · 等 ${esc(otherP ? otherP.name : '对方')} 掷…</button>`;
+        voidBtn = `<button class="btn plain" id="a-void" style="margin-top:10px">作废这笔</button>`;
+      }
+      billHtml = `
+        <div class="card fadein">
+          <div class="billhead">
+            <div class="amt">¥ ${fmt(b.amountCents)}</div>
+            <div class="note">${b.note ? esc(b.note) + ' · ' : ''}谁先垫付：${ph(P[b.payer])}</div>
+          </div>
+          <div class="hint">两人各掷一颗 1–${b.faces} 点的骰子，点数比 = 分账比</div>
+          ${diceHtml}
+          ${actionHtml}
+          ${voidBtn}
+        </div>`;
+    } else {
+      // result
+      let confirmLine = '';
+      if (b.confirms[r]) confirmLine = b.confirms[o] ? '' : `你已确认 ✅ · 等待 ${esc(otherP ? otherP.name : '对方')} 确认…`;
+      else if (b.confirms[o]) confirmLine = `${esc(otherP ? otherP.name : '对方')} 已确认 ✅ · 等你拍板`;
+      let actionHtml;
+      const pd = b.pending;
+      if (pd && pd.by === r) {
+        confirmLine = '';
+        actionHtml = `<button class="btn" disabled>⏳ 已提议${pd.type === 'reroll' ? '重掷' : '作废这笔'} · 等 ${esc(otherP.name)} 回应</button>
+          <button class="btn plain" id="a-withdraw" style="margin-top:10px">撤回提议</button>`;
+      } else if (pd) {
+        actionHtml = `<button class="btn" id="a-approve">✅ 同意${pd.type === 'reroll' ? '重掷' : '作废'}</button>
+          <button class="btn ghost" id="a-reject" style="margin-top:10px">🙅 不同意</button>`;
+        confirmLine = `${esc(otherP.name)} 提议${pd.type === 'reroll' ? '重掷' : '作废这笔'} · 等你回应`;
+      } else {
+        actionHtml = `${b.confirms[r] ? '' : `<button class="btn" id="a-confirm">✅ 就这样，记入账本</button>
+          <button class="btn ghost" id="a-reroll" style="margin-top:10px">🔄 不服，重掷</button>`}
+          <button class="btn plain" id="a-void" style="margin-top:10px">作废这笔</button>`;
+      }
+      billHtml = `
+        <div class="card fadein">
+          <div class="billhead">
+            <div class="amt">¥ ${fmt(b.amountCents)}</div>
+            <div class="note">${b.note ? esc(b.note) + ' · ' : ''}谁先垫付：${ph(P[b.payer])}</div>
+          </div>
+          <div class="ratio"><span class="av">${meP.avatar}</span> ${b.ratio[myIx]} : ${b.ratio[1 - myIx]} <span class="av">${otherP.avatar}</span></div>
+          ${diceHtml}
+          <div class="shares">
+            <div class="s${r === 'p1' ? 1 : 2}"><div class="who">${esc(meP.name)}</div><div class="m">¥ ${fmt(b.shares[r])}</div></div>
+            <div class="s${r === 'p1' ? 2 : 1}"><div class="who">${esc(otherP.name)}</div><div class="m">¥ ${fmt(b.shares[o])}</div></div>
+          </div>
+          <div class="confirmline">${confirmLine}${b.rerolls ? `<span class="rr">重掷 ×${b.rerolls}</span>` : ''}</div>
+          ${actionHtml}
+        </div>`;
+    }
+  }
+
+  /* 历史 */
+  const histHtml = room.history.length ? room.history.map((h) => `
+    <div class="card hitem" style="padding:13px 14px">
+      <div class="dice">${dieGlyph(h.rolls[r])}${dieGlyph(h.rolls[o])}</div>
+      <div class="mid">
+        <div class="t">${h.note ? esc(h.note) : '（没有备注）'}${h.rerolls ? `<span class="rr">重掷 ×${h.rerolls}</span>` : ''}</div>
+        <div class="d">${fmtTime(h.ts)} · ${h.ratio[myIx]}:${h.ratio[1 - myIx]}${h.faces && h.faces !== 6 ? ` · ${h.faces}面` : ''} · ${ph(room.players[h.payer])}垫付</div>
+      </div>
+      <div class="right">
+        <div class="sum">¥ ${fmt(h.amountCents)}</div>
+        <div class="mine">我 ¥ ${fmt(h.shares[r])}</div>
+      </div>
+      <button class="del" data-del="${h.id}" title="提议删除消费" aria-label="提议删除消费" ${ledgerBusy ? 'disabled' : ''}>✕</button>
+    </div>`).join('')
+    : `<div class="empty">${temporaryMode ? '临时账本还空着<br>这里只保留最近一笔分账' : '账本还空着<br>每一笔都会记在这里 📖'}</div>`;
+
+  const repaymentsHtml = room.repayments.map((p) => `
+    <div class="card hitem">
+      <div class="repayment-tag">还款</div>
+      <div class="mid">
+        <div class="t">${esc(P[p.from].name)} → ${esc(P[p.to].name)}</div>
+        <div class="d">${fmtTime(p.ts)} · 双方已确认</div>
+      </div>
+      <div class="right"><div class="sum">¥ ${fmt(p.amountCents)}</div><div class="mine">${p.from === r ? '我已支付' : '我已收到'}</div></div>
+      <button class="del" data-del-repayment="${p.id}" aria-label="提议删除还款记录" ${ledgerBusy ? 'disabled' : ''}>×</button>
+    </div>`).join('');
+
+  let ledgerHtml = '';
+  const pending = room.ledgerPending;
+  if (pending) {
+    let detail, approveLabel;
+    if (pending.type === 'repay') {
+      detail = `${ph(P[pending.from])} → ${ph(P[pending.to])} · ¥ ${fmt(pending.amountCents)}<br>请核实实际转账，双方确认后才抵扣欠款。`;
+      approveLabel = pending.to === r ? '确认已收到这笔还款' : '确认已支付这笔还款';
+    } else if (pending.type === 'clearHistory') {
+      detail = `清空 ${room.history.length} 笔消费和 ${room.repayments.length} 笔还款记录，余额归零；确认后不可恢复。`;
+      approveLabel = '同意清空全部记录';
+    } else if (pending.type === 'deleteHistory') {
+      const h = room.history.find((h) => h.id === pending.historyId);
+      detail = `删除消费：${esc(h.note || '未备注消费')} · ¥ ${fmt(h.amountCents)}<br>${temporaryMode ? '同时清理这笔分账的还款与已还金额汇总，余额归零。' : '删除后重新计算余额，不撤销已经发生的转账。'}`;
+      approveLabel = '同意删除这笔消费';
+    } else {
+      const p = room.repayments.find((p) => p.id === pending.repaymentId);
+      detail = `删除还款：${ph(P[p.from])} → ${ph(P[p.to])} · ¥ ${fmt(p.amountCents)}<br>删除后恢复这笔还款抵扣的欠款。`;
+      approveLabel = '同意删除这笔还款';
+    }
+    ledgerHtml = `<div class="card ledger-request" role="region" aria-label="账本待确认操作">
+      <h3>${pending.by === r ? '你的提议，等待对方确认' : esc(otherP.name) + ' 发来账本确认'}</h3>
+      <p>${detail}</p>
+      ${pending.by === r ? '<button class="btn plain" id="l-withdraw">撤回提议</button>' : `
+        <button class="btn" id="l-approve">${approveLabel}</button>
+        <button class="btn ghost" id="l-reject">不同意，保留原记录</button>`}
+    </div>`;
+  }
+
+  const luckTxt = st.n === 0 ? '—'
+    : st.luck > 0 ? `多担 ¥ ${fmt(st.luck)}（手气背）`
+    : st.luck < 0 ? `少担 ¥ ${fmt(-st.luck)}（手气旺）` : '刚好均摊';
+
+  $app.innerHTML = `
+    <div class="topbar">
+      <div class="title">🎲 骰子分账</div>
+      <button class="iconbtn" id="a-settings">⚙️</button>
+    </div>
+
+    ${temporaryNotice()}
+    <div class="card roomcard">
+      <div>
+        <div class="code">${room.code}</div>
+        <label style="margin:4px 0 0">房间码 · 点右侧邀请</label>
+      </div>
+      <div class="players">
+        ${['p1','p2'].map((role) => {
+          const p = room.players[role];
+          return p ? `<div class="player"><div class="face">${p.avatar}<span class="dot ${p.online ? 'on' : ''}"></span></div>
+            <div class="name">${esc(p.name)}${role === r ? '（我）' : ''}</div></div>`
+          : `<div class="player"><div class="face" style="filter:grayscale(1);opacity:.4">❓</div><div class="name">待加入</div></div>`;
+        }).join('')}
+      </div>
+    </div>
+
+    ${waitingP2 ? `
+      <div class="card settle">
+        <div class="k">把房间码发给对方，等 TA 加入</div>
+        <div class="v" style="font-size:34px;letter-spacing:6px;">${room.code}</div>
+        <button class="btn small" id="a-invite" style="margin-top:12px">📋 复制邀请链接</button>
+      </div>` : `
+      <div class="card settle">
+        <div class="k">${settleK}</div>
+        <div class="v ${settleCls}">${settleV}</div>
+        <div class="sub">以五五开为基准，你的手气：${luckTxt}</div>
+        ${room.repayments.length || room.repaymentCarryCents ? '<div class="sub">余额已抵扣双方确认的还款</div>' : ''}
+        ${temporaryMode && room.repaymentCarryCents ? `<div class="sub">旧还款明细已清理，仍计入已还金额 ¥ ${fmt(Math.abs(room.repaymentCarryCents))}</div>` : ''}
+        ${net !== 0 ? `<button class="btn ghost small" id="a-repay" style="margin:14px auto 0" ${ledgerBusy ? 'disabled' : ''}>记录还款 / 结清</button>` : ''}
+        <div class="stats">
+          <div><div class="n">${st.n}</div><div class="l">笔数</div></div>
+          <div><div class="n">¥ ${fmt(st.total)}</div><div class="l">总消费</div></div>
+          <div><div class="n">¥ ${fmt(st.paidMe)}</div><div class="l">我垫付</div></div>
+          <div><div class="n">¥ ${fmt(st.shareMe)}</div><div class="l">我承担</div></div>
+        </div>
+      </div>`}
+
+    ${ledgerHtml}
+    ${(room.phase === 'idle' && !waitingP2 && !room.ledgerPending) ? `<button class="btn" id="a-new">＋ 记一笔，掷骰分账</button>` : ''}
+    ${billHtml}
+
+    <div class="h2">📖 ${temporaryMode ? '临时账本' : '账本'} <span>${temporaryMode ? '仅最近一笔 · 双方同步' : room.history.length + ' 笔消费 · 双方同步'}</span></div>
+    ${histHtml}
+    ${room.repayments.length ? `<div class="h2">还款记录 <span>${temporaryMode ? '仅最近一条明细' : room.repayments.length + ' 笔 · 不计入消费'}</span></div>${repaymentsHtml}` : ''}
+  `;
+
+  bindRoomEvents();
+}
+
+function bindRoomEvents() {
+  const on = (id, fn) => { const el = document.getElementById(id); if (el) el.addEventListener('click', fn); };
+  const act = (body) => api('/api/action', { code: me.code, token: me.token, ...body })
+    .catch((e) => { if (e.message.includes('失效')) leaveRoom(e.message); else toast(e.message); });
+
+  on('a-invite', async () => {
+    const link = location.origin + '/#' + room.code;
+    const text = `【骰子分账】房间码 ${room.code}，点这里加入：${link}`;
+    try {
+      if (navigator.share) { await navigator.share({ title: '骰子分账', text }); return; }
+      await navigator.clipboard.writeText(text);
+      toast('邀请已复制，去微信粘贴给 TA');
+    } catch (e) { toast('复制失败，手动输入房间码吧: ' + room.code); }
+  });
+  on('a-new', () => openBillSheet());
+  on('a-repay', () => openRepaymentSheet());
+  on('a-settings', () => openSettings());
+  const proposalId = room.ledgerPending?.id;
+  on('l-approve', () => act({ type: 'ledgerRespond', proposalId, approve: true }));
+  on('l-reject', () => act({ type: 'ledgerRespond', proposalId, approve: false }));
+  on('l-withdraw', () => act({ type: 'ledgerWithdraw', proposalId }));
+
+  on('a-roll', () => {
+    rollAnimUntil = Date.now() + 1300;
+    if (animTimer) clearTimeout(animTimer);
+    animTimer = setTimeout(render, 1350); // 动画结束后刷新显示真点数
+    render();
+    act({ type: 'roll' }).then((d) => { if (d && d.roll) { myLocalRoll = d.roll; render(); } });
+  });
+  const billProposalId = room.bill?.pending?.id;
+  on('a-reroll', () => { act({ type: 'reroll', proposalId: billProposalId }); });
+  on('a-confirm', () => act({ type: 'confirm' }));
+  on('a-void', () => { act({ type: 'void', proposalId: billProposalId }); });
+  on('a-approve', () => act({ type: 'respond', proposalId: billProposalId, approve: true }));
+  on('a-reject', () => act({ type: 'respond', proposalId: billProposalId, approve: false }));
+  on('a-withdraw', () => act({ type: 'withdraw', proposalId: billProposalId }));
+  document.querySelectorAll('[data-del]').forEach((b) => b.addEventListener('click', () => {
+    if (confirm(temporaryMode ? '提议删除这笔临时分账及其还款？对方同意后清理记录与已还金额汇总，余额归零。' : '提议删除这条消费？对方同意后才会删除并重算余额。')) act({ type: 'deleteHistory', id: b.dataset.del });
+  }));
+  document.querySelectorAll('[data-del-repayment]').forEach((b) => b.addEventListener('click', () => {
+    if (confirm('提议删除这条还款？对方同意后将撤销这笔抵扣。')) act({ type: 'deleteRepayment', id: b.dataset.delRepayment });
+  }));
+}
+
+/* ============ 记一笔弹层 ============ */
+let billForm = { amount: '', note: '', payer: 'p1' };
+
+function openBillSheet() {
+  billForm = { amount: '', note: '', payer: me.role };
+  renderBillSheet();
+}
+
+function renderBillSheet() {
+  const P = room.players;
+  $modal.innerHTML = `
+    <div class="mask" id="mask">
+      <div class="sheet" onclick="event.stopPropagation()">
+        <h3>🎲 记一笔</h3>
+        <div class="amt-input"><span class="yen">¥</span>
+          <input type="tel" inputmode="decimal" id="b-amount" placeholder="0.00" autofocus></div>
+        ${temporaryMode ? '<p class="hint">双方确认入账后，将自动删除上一笔分账及其还款，余额只计算新的一笔。</p>' : ''}
+        <label>备注（选填，比如：晚饭 · 火锅）</label>
+        <input type="text" id="b-note" maxlength="30" placeholder="这顿是干啥的">
+        <label>这次谁先垫付的？</label>
+        <div class="chips">
+          <button data-payer="p1" class="${billForm.payer === 'p1' ? 'on' : ''}">${P.p1.avatar} ${esc(P.p1.name)}</button>
+          <button data-payer="p2" class="${billForm.payer === 'p2' ? 'on' : ''}">${P.p2 ? P.p2.avatar + ' ' + esc(P.p2.name) : '对方'}</button>
+        </div>
+        <button class="btn" id="b-go">🎲 开掷</button>
+        <button class="btn plain" id="b-cancel">先不记了</button>
+      </div>
+    </div>`;
+  const amt = document.getElementById('b-amount');
+  amt.addEventListener('input', (e) => {
+    billForm.amount = e.target.value.replace(/[^\d.]/g, '').replace(/(\..*)\./g, '$1');
+    if (billForm.amount !== e.target.value) e.target.value = billForm.amount;
+  });
+  document.getElementById('b-note').addEventListener('input', (e) => { billForm.note = e.target.value; });
+  $modal.querySelectorAll('[data-payer]').forEach((b) => b.addEventListener('click', () => {
+    billForm.payer = b.dataset.payer; renderBillSheet();
+    // 重绘后恢复焦点与已输入内容
+    document.getElementById('b-amount').value = billForm.amount;
+    document.getElementById('b-note').value = billForm.note;
+  }));
+  document.getElementById('b-cancel').addEventListener('click', closeModal);
+  document.getElementById('mask').addEventListener('click', (e) => { if (e.target.id === 'mask') closeModal(); });
+  document.getElementById('b-go').addEventListener('click', async () => {
+    const cents = Math.round(parseFloat(billForm.amount) * 100);
+    if (!cents || cents <= 0) { toast('先填个金额呀'); return; }
+    if (billForm.amount.split('.').length === 2 && billForm.amount.split('.')[1].length > 2) { toast('最多到分哦'); return; }
+    try {
+      await api('/api/action', { code: me.code, token: me.token, type: 'start',
+        amountCents: cents, note: billForm.note, payer: billForm.payer });
+      closeModal();
+      rollAnimUntil = 0;
+    } catch (e) { toast(e.message); }
+  });
+  setTimeout(() => amt.focus(), 250);
+}
+
+function openRepaymentSheet() {
+  const net = room.balance[me.role];
+  const amount = Math.abs(net);
+  const from = net < 0 ? me.role : otherRole();
+  const to = from === 'p1' ? 'p2' : 'p1';
+  $modal.innerHTML = `
+    <div class="mask" id="mask">
+      <div class="sheet" role="dialog" aria-modal="true" aria-labelledby="repay-title">
+        <h3 id="repay-title">记录已发生的还款</h3>
+        <p class="hint">${ph(room.players[from])} → ${ph(room.players[to])}</p>
+        <label for="repay-amount">还款金额 · 当前待还 ¥ ${fmt(amount)}</label>
+        <div class="amt-input"><span class="yen">¥</span>
+          <input type="tel" inputmode="decimal" id="repay-amount" value="${(amount / 100).toFixed(2)}"></div>
+        <button class="btn ghost small" id="repay-all" style="margin:10px auto">填入全部欠款</button>
+        <p class="hint">可以只还一部分；另一人确认后才抵扣余额。<br>这里只记账，不会发起真实转账。</p>
+        <button class="btn" id="repay-go">提交给对方确认</button>
+        <button class="btn plain" id="repay-cancel">取消</button>
+      </div>
+    </div>`;
+  const input = document.getElementById('repay-amount');
+  document.getElementById('repay-all').addEventListener('click', () => { input.value = (amount / 100).toFixed(2); });
+  document.getElementById('repay-cancel').addEventListener('click', closeModal);
+  document.getElementById('mask').addEventListener('click', (e) => { if (e.target.id === 'mask') closeModal(); });
+  document.getElementById('repay-go').addEventListener('click', async (e) => {
+    const value = input.value.trim();
+    const cents = Math.round(Number(value) * 100);
+    if (!/^(?:\d+(?:\.\d{0,2})?|\.\d{1,2})$/.test(value) || !Number.isSafeInteger(cents) || cents < 1 || cents > amount) {
+      toast('请输入大于零、不超过欠款的金额，最多两位小数'); return;
+    }
+    const button = e.currentTarget;
+    button.disabled = true;
+    try {
+      await api('/api/action', { code: me.code, token: me.token, type: 'repay', amountCents: cents });
+      closeModal();
+      toast('已提交，等待对方核实还款');
+    } catch (err) { button.disabled = false; toast(err.message); }
+  });
+}
+
+function openSettings() {
+  const P = room.players, r = me.role;
+  $modal.innerHTML = `
+    <div class="mask" id="mask">
+      <div class="sheet">
+        <h3>⚙️ 设置</h3>
+        <label>我的昵称</label>
+        <input type="text" id="s-name" maxlength="12" value="${esc(P[r].name)}">
+        <label>我的头像</label>
+        <div class="avatars" id="s-avs">${AVATARS.map((a) =>
+          `<button data-av="${a}" class="${P[r].avatar === a ? 'on' : ''}">${a}</button>`).join('')}</div>
+        <label>骰子面数 · 每人掷 1–N 点</label>
+        <div class="chips" id="s-faces">${[4, 6, 8, 10, 12, 20].map((f) =>
+          `<button data-faces="${f}" class="${(room.faces || 6) === f ? 'on' : ''}">${f}面</button>`).join('')}</div>
+        <label>账本管理</label>
+        <div style="display:flex; gap:8px">
+          <button class="btn danger" style="flex:1;margin-top:0" id="s-clear" ${room.phase !== 'idle' || room.ledgerPending || (!room.history.length && !room.repayments.length) ? 'disabled' : ''}>提议清空账本</button>
+          <button class="btn plain" style="flex:1;margin-top:0" id="s-leave">退出房间</button>
+        </div>
+        <label>换手机？在另一台设备「加入房间」填这个房间码并选择认领</label>
+        <div style="font-size:13px;color:var(--sub);line-height:1.7">
+          房间码 <b style="color:var(--brand)">${room.code}</b> ·
+          你的角色 <b>${r === 'p1' ? 'P1 ' + P.p1.avatar : 'P2 ' + (P.p2 ? P.p2.avatar : '')}</b><br>
+          认领入口：加入时房间已满会提示认领，认领后旧设备自动失效。
+        </div>
+        <button class="btn plain" id="s-close">关闭</button>
+      </div>
+    </div>`;
+  let avatar = P[r].avatar;
+  const save = async () => {
+    const name = document.getElementById('s-name').value.trim();
+    try { await api('/api/action', { code: me.code, token: me.token, type: 'setMe', name, avatar }); } catch (e) { toast(e.message); }
+  };
+  document.getElementById('s-name').addEventListener('change', save);
+  $modal.querySelectorAll('#s-avs button').forEach((b) => b.addEventListener('click', () => {
+    avatar = b.dataset.av;
+    $modal.querySelectorAll('#s-avs button').forEach((x) => x.classList.toggle('on', x === b));
+    save();
+  }));
+  $modal.querySelectorAll('#s-faces button').forEach((b) => b.addEventListener('click', () => {
+    const f = Number(b.dataset.faces);
+    const cur = room.faces || 6;
+    if (f === cur) return;
+    const setOn = (v) => $modal.querySelectorAll('#s-faces button').forEach((x) =>
+      x.classList.toggle('on', Number(x.dataset.faces) === v));
+    setOn(f); // 先亮再存，失败回滚（比如这一把还没掷完）
+    api('/api/action', { code: me.code, token: me.token, type: 'setFaces', faces: f })
+      .catch((e) => { setOn(cur); toast(e.message); });
+  }));
+  document.getElementById('s-clear').addEventListener('click', function () {
+    if (!confirm('提议清空全部消费和还款记录？对方同意后余额归零，记录不可恢复。')) return;
+    this.disabled = true;
+    api('/api/action', { code: me.code, token: me.token, type: 'clearHistory' })
+      .then(() => { closeModal(); toast('清空提议已发送，等待对方同意'); })
+      .catch((e) => { this.disabled = false; toast(e.message); });
+  });
+  document.getElementById('s-leave').addEventListener('click', () => {
+    if (confirm(temporaryMode ? '当前未设置密码。最后一人退出后，房间和全部记录立即销毁，无法恢复。确定退出？' : '退出后账本还在房间里，重新加入可再看。确定退出？')) { closeModal(); leaveRoom(); }
+  });
+  document.getElementById('s-close').addEventListener('click', closeModal);
+  document.getElementById('mask').addEventListener('click', (e) => { if (e.target.id === 'mask') closeModal(); });
+}
+
+function closeModal() { $modal.innerHTML = ''; }
+
+/* ============ 主渲染 ============ */
+function render() {
+  if (!me) { renderHome(); return; }
+  if (!room) { $app.innerHTML = `<div class="empty" style="padding-top:120px">连接房间中…</div>`; return; }
+  // 只有阶段切换（新一笔开始/揭晓/入账）才收起弹层，避免对方上线推送打断"记一笔"输入
+  const phaseKey = `${room.phase}:${room.bill ? room.bill.rerolls : ''}:${room.history.length}:${room.repayments.length}:${room.ledgerPending?.id || ''}`;
+  if (phaseKey !== lastPhaseKey) { lastPhaseKey = phaseKey; closeModal(); }
+  renderRoom();
+}
+
+connect();
+render();
+</script>
+</body>
+</html>
