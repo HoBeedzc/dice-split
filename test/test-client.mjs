@@ -20,6 +20,8 @@ function client(outcomes = []) {
     me: identity, room: null, es: null, passcode: '', ME_KEY: 'dice-split-me',
     connectAttempt: 0, connectTimer: null, myLocalRoll: null, rollAnimUntil: 0,
     animTimer: null, lastPhaseKey: '', temporaryMode: false,
+    roomPage: 'dice', pageScroll: { dice: 0, ledger: 0 }, noticeExpanded: false,
+    recentRecordedId: null, expandedHistory: new Set(),
     encodeURIComponent,
     AbortSignal: { timeout: (ms) => ({ timeout: ms }) },
     localStorage: { removeItem: (key) => storage.delete(key) },
@@ -241,4 +243,180 @@ test('未参与成员不计算手气，省略还款按成员净额合并', () =>
   assert.equal(stats.byMember.p3.share, 0);
   assert.equal(stats.byMember.p1.repaid, -15);
   assert.equal(stats.byMember.p2.repaid, 15);
+});
+
+function roomClient() {
+  const elements = new Map();
+  const details = [];
+  const app = { innerHTML: '', classList: { add() {} }, querySelectorAll: (selector) => selector === '[data-history]' ? details : [] };
+  const context = vm.createContext({
+    me: { code: 'TEST1', role: 'p1', recoveryCode: 'test-recovery' },
+    room: {
+      code: 'TEST1', capacity: 3, phase: 'idle', faces: 6, bill: null, ledgerPending: null,
+      players: Object.fromEntries(['p1', 'p2', 'p3'].map((id) => [id, { name: id, avatar: '', online: true }])),
+      history: [], repayments: [], balance: { p1: 0, p2: 0, p3: 0 },
+    },
+    roomPage: 'dice', pageScroll: { dice: 0, ledger: 0 }, noticeExpanded: false,
+    recentRecordedId: null, temporaryMode: true, rollAnimUntil: 0, myLocalRoll: null,
+    $app: app, $modal: { firstElementChild: null },
+    window: { scrollY: 0, scrollTo({ top }) { this.scrollY = top; } },
+    document: { activeElement: null, getElementById: (id) => elements.get(id), querySelectorAll: () => [] },
+  });
+  for (const id of ['nav-dice', 'nav-ledger']) elements.set(id, {
+    id, addEventListener() {}, focus() { context.document.activeElement = this; },
+  });
+  vm.runInContext(html.slice(html.indexOf('const fmt ='), html.indexOf('let passcode =')), context);
+  vm.runInContext(html.slice(html.indexOf('function temporaryNotice('), html.indexOf('const ME_KEY')), context);
+  vm.runInContext(html.slice(html.indexOf('function myRole('), html.indexOf('/* ============ 记一笔')), context);
+  return { context, app, elements, details };
+}
+
+const activeBill = () => ({
+  amountCents: 1000, payer: 'p1', participants: ['p1', 'p2'], required: ['p1', 'p2', 'p3'],
+  faces: 6, rolled: {}, confirms: {}, rolls: { p1: 2, p2: 3 }, shares: { p1: 400, p2: 600 }, ratio: [2, 3],
+});
+
+test('房间默认只展示投骰子，汇总页承载结算和恢复提醒', () => {
+  const c = roomClient();
+  c.context.renderRoom();
+  assert.match(c.app.innerHTML, /<h1 class="title">投骰子分账/);
+  assert.match(c.app.innerHTML, /aria-label="房间成员"/);
+  assert.match(c.app.innerHTML, /id="a-new"/);
+  assert.doesNotMatch(c.app.innerHTML, /aria-label="我的结算"|大家的账|aria-label="身份恢复提醒"/);
+  c.context.switchRoomPage('ledger');
+  assert.match(c.app.innerHTML, /<h1 class="title">记账汇总/);
+  assert.match(c.app.innerHTML, /aria-label="我的结算"/);
+  assert.match(c.app.innerHTML, /大家的账|账本还空着/);
+  assert.match(c.app.innerHTML, /aria-label="身份恢复提醒"/);
+  assert.doesNotMatch(c.app.innerHTML, /aria-label="房间成员"|id="a-new"/);
+  assert.equal(c.context.document.activeElement.id, 'nav-ledger');
+});
+
+test('导航分别保存滚动位置，实时重绘不抢页面或滚动位置', () => {
+  const c = roomClient();
+  c.context.window.scrollY = 180;
+  c.context.switchRoomPage('ledger');
+  assert.equal(c.context.window.scrollY, 0);
+  c.context.window.scrollY = 920;
+  c.context.renderRoom();
+  assert.equal(c.context.roomPage, 'ledger');
+  assert.equal(c.context.window.scrollY, 920);
+  c.context.switchRoomPage('dice');
+  assert.equal(c.context.window.scrollY, 180);
+  c.context.switchRoomPage('ledger');
+  assert.equal(c.context.window.scrollY, 920);
+  c.context.switchRoomPage('dice');
+  c.context.switchRoomPage('ledger', true);
+  assert.equal(c.context.window.scrollY, 0);
+});
+
+test('重绘前保存账单和临时说明的展开状态，即使 toggle 事件尚未触发', () => {
+  const c = roomClient();
+  c.context.room.history = [{ ...activeBill(), id: 'bill-1', ts: Date.now() }];
+  c.context.switchRoomPage('ledger');
+  c.details.push({ dataset: { history: 'bill-1' }, open: true, addEventListener() {} });
+  c.elements.set('room-notice', { open: true });
+  c.context.switchRoomPage('dice');
+  c.details.length = 0;
+  c.context.switchRoomPage('ledger');
+  assert.match(c.app.innerHTML, /data-history="bill-1" open/);
+  assert.match(c.app.innerHTML, /id="room-notice" open/);
+  c.details.push({ dataset: { history: 'bill-1' }, open: false, addEventListener() {} });
+  c.elements.set('room-notice', { open: false });
+  c.context.renderRoom();
+  assert.doesNotMatch(c.app.innerHTML, /data-history="bill-1" open|id="room-notice" open/);
+});
+
+test('投骰导航区分待掷骰、已操作等待、旁观者和临时模式非参与者确认', () => {
+  const c = roomClient(), state = c.context;
+  assert.equal(state.roomPageStatus('dice'), '');
+  state.room.bill = activeBill();
+  state.room.phase = 'rolling';
+  assert.equal(state.roomPageStatus('dice'), '待掷骰');
+  state.room.bill.rolled.p1 = true;
+  assert.equal(state.roomPageStatus('dice'), '进行中');
+  state.me.role = 'p3';
+  assert.equal(state.roomPageStatus('dice'), '进行中');
+  state.room.phase = 'result';
+  assert.equal(state.roomPageStatus('dice'), '待确认');
+  state.room.bill.confirms.p3 = true;
+  assert.equal(state.roomPageStatus('dice'), '进行中');
+  state.room.bill.required = ['p1', 'p2'];
+  delete state.room.bill.confirms.p3;
+  assert.equal(state.roomPageStatus('dice'), '进行中');
+});
+
+test('两类提议仅对尚未同意的相关成员显示待确认', () => {
+  const { context: c } = roomClient();
+  c.room.bill = activeBill();
+  c.room.phase = 'result';
+  const proposal = { by: 'p2', required: ['p1', 'p2'], approvals: { p2: true } };
+  c.room.bill.pending = proposal;
+  c.room.ledgerPending = proposal;
+  for (const page of ['dice', 'ledger']) {
+    c.me.role = 'p1';
+    assert.equal(c.roomPageStatus(page), '待确认');
+    proposal.approvals.p1 = true;
+    assert.equal(c.roomPageStatus(page), '进行中');
+    delete proposal.approvals.p1;
+    c.me.role = 'p2';
+    assert.equal(c.roomPageStatus(page), '进行中');
+    c.me.role = 'p3';
+    assert.equal(c.roomPageStatus(page), '进行中');
+  }
+});
+
+test('跨页提示解释互斥操作，并将提议和骰子操作留在对应页面', () => {
+  const { context: c, app } = roomClient();
+  c.room.ledgerPending = { id: 'pending-1', type: 'repay', by: 'p2', from: 'p2', to: 'p1', amountCents: 100, required: ['p1', 'p2'], approvals: { p2: true } };
+  c.renderRoom();
+  assert.match(app.innerHTML, /id="a-ledger-pending"/);
+  assert.doesNotMatch(app.innerHTML, /id="a-new"|id="l-approve"/);
+  c.switchRoomPage('ledger');
+  assert.match(app.innerHTML, /id="l-approve"/);
+  assert.ok(app.innerHTML.indexOf('待确认提议') < app.innerHTML.indexOf('我的结算'));
+  c.room.ledgerPending = null;
+  c.room.bill = activeBill();
+  c.room.phase = 'rolling';
+  c.renderRoom();
+  assert.match(app.innerHTML, /id="a-dice-pending"/);
+  assert.doesNotMatch(app.innerHTML, /aria-label="当前分账"|id="a-roll"/);
+  c.switchRoomPage('dice');
+  assert.match(app.innerHTML, /aria-label="当前分账"/);
+  assert.match(app.innerHTML, /id="a-roll"/);
+});
+
+test('临时模式替换同数量记录仍提示入账，首次连接及作废不会误报', async () => {
+  const c = client([response(200)]);
+  await c.context.connect();
+  const emit = (snap) => c.streams[0].onmessage({ data: JSON.stringify(snap) });
+  const snap = { history: [{ id: 'old' }], bill: null, phase: 'idle', temporaryMode: true };
+  c.context.roomPage = 'ledger';
+  emit(snap);
+  assert.equal(c.messages.length, 0);
+  emit({ ...snap, history: [{ id: 'new' }] });
+  assert.equal(c.context.recentRecordedId, 'new');
+  assert.match(c.messages[0], /已记入账本/);
+  assert.equal(c.context.roomPage, 'ledger');
+  emit({ ...snap, history: [{ id: 'new' }] });
+  assert.equal(c.messages.length, 1);
+  emit({ ...snap, history: [{ id: 'new' }], phase: 'rolling', bill: { rolled: {} } });
+  assert.equal(c.context.recentRecordedId, null);
+  emit({ ...snap, history: [{ id: 'new' }] });
+  assert.equal(c.messages.length, 1);
+});
+
+test('退出重置页面、滚动位置与展开状态，新房间从投骰页开始', () => {
+  const c = client();
+  c.context.roomPage = 'ledger';
+  c.context.pageScroll.ledger = 900;
+  c.context.noticeExpanded = true;
+  c.context.recentRecordedId = 'old';
+  c.context.expandedHistory.add('old');
+  c.context.leaveRoom();
+  assert.equal(c.context.roomPage, 'dice');
+  assert.equal(c.context.pageScroll.ledger, 0);
+  assert.equal(c.context.noticeExpanded, false);
+  assert.equal(c.context.recentRecordedId, null);
+  assert.equal(c.context.expandedHistory.size, 0);
 });

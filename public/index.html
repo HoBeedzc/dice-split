@@ -174,7 +174,7 @@
   .chips button.on { border-color: var(--brand); color: var(--brand); background: #FFF3EC; }
   .sheet .btn { margin-top: 16px; }
 
-  #toast { position: fixed; left: 50%; bottom: 88px; transform: translateX(-50%); z-index: 99;
+  #toast { position: fixed; left: 50%; bottom: calc(92px + env(safe-area-inset-bottom)); transform: translateX(-50%); z-index: 99;
     background: rgba(61,50,41,.92); color: #fff; font-size: 14px; padding: 10px 18px; border-radius: 999px;
     opacity: 0; pointer-events: none; transition: opacity .25s; max-width: 80vw; text-align: center; }
   #toast.show { opacity: 1; }
@@ -182,7 +182,25 @@
   .fadein { animation: fadein .25s ease; }
   @keyframes fadein { from { opacity: 0; transform: translateY(8px); } }
 
-  #app.room-view { max-width: 800px; }
+  #app.room-view { max-width: 800px; padding-bottom: calc(110px + env(safe-area-inset-bottom)); }
+  .topbar .room-code { margin-top: 4px; color: var(--sub); font-size: 12px; letter-spacing: 1px; }
+  .room-nav { position: fixed; left: 50%; bottom: 0; transform: translateX(-50%); z-index: 20;
+    width: 100%; max-width: 800px; display: grid; grid-template-columns: 1fr 1fr; gap: 8px;
+    padding: 10px 16px calc(10px + env(safe-area-inset-bottom)); background: #FFFCF8;
+    border-top: 1px solid var(--line); box-shadow: 0 -4px 24px rgba(90,60,30,.06); }
+  .room-nav button { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px;
+    min-height: 58px; border: 0; border-radius: 14px; background: transparent; color: var(--sub);
+    font: inherit; font-size: 14px; font-weight: 700; cursor: pointer; }
+  .room-nav button[aria-current=page] { background: #FFEDE4; color: #A83F35; }
+  .nav-status { font-size: 11px; font-weight: 500; line-height: 16px; }
+  .nav-status.attention { background: #A83F35; color: #fff; border-radius: 10px; padding: 0 7px; }
+  .page-prompt { border: 1px solid var(--line); }
+  .page-prompt h2 { font-size: 18px; }
+  .page-prompt p { margin-top: 8px; color: var(--sub); font-size: 13px; line-height: 1.7; }
+  .page-prompt.saved { border-color: #B9DED6; background: #F0FAF6; }
+  .temporary-notice.compact { padding: 4px 12px; }
+  .temporary-notice summary { color: #74451F; font-size: 12px; font-weight: 600; }
+  .temporary-notice .notice-detail { padding: 0 0 8px; }
   :root { --sub: #796B5D; }
   button, input, select, summary { touch-action: manipulation; }
   button:focus-visible, input:focus-visible, select:focus-visible, summary:focus-visible {
@@ -194,6 +212,7 @@
   .roomcard { display: block; }
   .room-heading { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; }
   .room-heading .hint { text-align: left; margin-top: 4px; }
+  .room-heading .title { font-size: 16px; }
   .players { display: grid; grid-template-columns: repeat(auto-fit, minmax(72px, 1fr)); gap: 10px; margin-top: 18px; }
   .player { min-width: 0; padding: 10px 4px; background: #FFF9F1; border-radius: 14px; }
   .player .name { max-width: none; white-space: normal; overflow-wrap: anywhere; color: var(--ink); }
@@ -265,19 +284,27 @@ const $app = document.getElementById('app');
 const $modal = document.getElementById('modal-root');
 let temporaryMode = document.querySelector('meta[name="dice-split-temporary"]').content === 'true';
 const staleMessage = () => temporaryMode ? '临时房间已销毁或身份已失效，请重新开房或加入' : '身份已失效，请重新进入房间';
-function temporaryNotice() {
-  return temporaryMode ? `<aside class="temporary-notice" role="note" aria-label="无密码临时模式提示">
-    <strong>目前未设置密码 · 临时模式</strong>
-    房间内容仅在内存中，不保存到磁盘。最后一人断开或服务重启后，房间及全部记录立即销毁。<br>
+function temporaryNotice(compact = false) {
+  if (!temporaryMode) return '';
+  const detail = `房间内容仅在内存中，不保存到磁盘。最后一人断开或服务重启后，房间及全部记录立即销毁。<br>
     分账仅留最近一笔，新分账经开掷时所有成员确认后替换旧分账及其还款；还款明细只留最新一条，省略明细按每位成员的还款净额保留。<br>
-    独自刷新或关闭页面也可能销毁房间；已销毁的房间无法用恢复码找回。公网使用仍建议设置密码。
-  </aside>` : '';
+    独自刷新或关闭页面也可能销毁房间；已销毁的房间无法用恢复码找回。公网使用仍建议设置密码。`;
+  return compact ? `<details class="temporary-notice compact" id="room-notice" ${noticeExpanded ? 'open' : ''}>
+    <summary>临时模式 · 仅留最近一笔 · 无人在线即销毁</summary>
+    <div class="notice-detail">目前未设置密码。${detail}</div>
+  </details>` : `<aside class="temporary-notice" role="note" aria-label="无密码临时模式提示">
+    <strong>目前未设置密码 · 临时模式</strong>${detail}
+  </aside>`;
 }
 
 const ME_KEY = 'dice-split-me';
 let me = null;            // { code, token, role }
 try { me = JSON.parse(localStorage.getItem(ME_KEY) || 'null'); } catch (e) { me = null; }
 let room = null;          // 服务器快照
+let roomPage = 'dice';
+let pageScroll = { dice: 0, ledger: 0 };
+let noticeExpanded = false;
+let recentRecordedId = null;
 let es = null;            // EventSource
 let connectAttempt = 0;
 let connectTimer = null;
@@ -391,6 +418,12 @@ async function connect(retryDelay = 1000) {
     if (es !== stream) return;
     const snap = JSON.parse(ev.data);
     if (snap.error === 'stale') { leaveRoom(staleMessage()); return; }
+    const latest = snap.history[0];
+    if (room && latest && !room.history.some((h) => h.id === latest.id)) {
+      recentRecordedId = latest.id;
+      toast('分账已确认，已记入账本');
+    }
+    if (snap.bill || !snap.history.some((h) => h.id === recentRecordedId)) recentRecordedId = null;
     room = snap;
     temporaryMode = snap.temporaryMode;
     // 掷骰进行中且自己尚未掷（新的一笔 / 被重掷），清掉本地暂存点数
@@ -414,6 +447,11 @@ function leaveRoom(msg) {
   rollAnimUntil = 0;
   clearTimeout(animTimer);
   lastPhaseKey = '';
+  roomPage = 'dice';
+  pageScroll = { dice: 0, ledger: 0 };
+  noticeExpanded = false;
+  recentRecordedId = null;
+  expandedHistory.clear();
   closeModal();
   localStorage.removeItem(ME_KEY);
   render();
@@ -571,6 +609,25 @@ function proposalHtml(pd, prefix, detail, approveLabel) {
 }
 const expandedHistory = new Set();
 
+function roomPageStatus(page) {
+  const r = myRole();
+  const pending = page === 'dice' ? room.bill?.pending : room.ledgerPending;
+  if (pending) return pending.by !== r && pending.required.includes(r) && !pending.approvals?.[r] ? '待确认' : '进行中';
+  if (page !== 'dice' || !room.bill) return '';
+  const b = room.bill;
+  if (room.phase === 'rolling' && participantsOf(b).includes(r) && !b.rolled?.[r] && Date.now() >= rollAnimUntil) return '待掷骰';
+  if (room.phase === 'result' && (b.required || participantsOf(b)).includes(r) && !b.confirms?.[r]) return '待确认';
+  return '进行中';
+}
+
+function switchRoomPage(page, scrollTop = false) {
+  if (page === roomPage) return;
+  pageScroll[roomPage] = window.scrollY;
+  roomPage = page;
+  renderRoom(scrollTop ? 0 : pageScroll[page]);
+  document.getElementById(`nav-${page}`).focus({ preventScroll: true });
+}
+
 function fmtTime(ts) {
   const d = new Date(ts), now = new Date();
   const hm = `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
@@ -581,16 +638,20 @@ function fmtTime(ts) {
   return `${d.getMonth() + 1}月${d.getDate()}日 ${hm}`;
 }
 
-function renderRoom() {
+function renderRoom(scrollY = window.scrollY) {
   const r = myRole(), P = room.players, ids = memberIds();
   const stats = calcStats(), st = stats.byMember[r];
   if (!st) return;
   const net = st.net, busy = ledgerBusy();
   const hasCarry = ids.some((id) => stats.byMember[id].carry !== 0);
   const focusId = document.activeElement?.id;
+  noticeExpanded = document.getElementById('room-notice')?.open ?? noticeExpanded;
+  $app.querySelectorAll('[data-history]').forEach((el) => {
+    if (el.open) expandedHistory.add(el.dataset.history); else expandedHistory.delete(el.dataset.history);
+  });
 
   let billHtml = '';
-  if (room.bill && (room.phase === 'rolling' || room.phase === 'result')) {
+  if (roomPage === 'dice' && room.bill && (room.phase === 'rolling' || room.phase === 'result')) {
     const b = room.bill, participants = participantsOf(b), required = b.required || participants;
     const participating = participants.includes(r), eligible = required.includes(r);
     const animating = Date.now() < rollAnimUntil, result = room.phase === 'result';
@@ -638,7 +699,7 @@ function renderRoom() {
     </section>`;
   }
 
-  const histHtml = room.history.length ? room.history.map((h) => {
+  const histHtml = roomPage !== 'ledger' ? '' : room.history.length ? room.history.map((h) => {
     const participants = participantsOf(h), mine = participants.includes(r);
     return `<article class="card history-card">
       <div class="hitem">
@@ -660,7 +721,7 @@ function renderRoom() {
     </article>`;
   }).join('') : `<div class="empty">账本还空着<br>${temporaryMode ? '这里只保留最近一笔分账' : '每次确认的分账都会记在这里'}</div>`;
 
-  const repaymentsHtml = room.repayments.map((p) => `<div class="card hitem">
+  const repaymentsHtml = roomPage !== 'ledger' ? '' : room.repayments.map((p) => `<div class="card hitem">
     <div class="repayment-tag">还款</div>
     <div class="mid"><div class="t">${esc(memberName(p.from))} → ${esc(memberName(p.to))}</div>
       <div class="d">${fmtTime(p.ts)} · 付款人与收款人已确认</div></div>
@@ -693,16 +754,15 @@ function renderRoom() {
 
   $app.classList.add('room-view');
   $app.innerHTML = `
-    <div class="topbar"><div class="title">骰子分账</div>
-      <button class="btn plain small" id="a-settings" aria-label="打开设置与个人恢复码">设置</button></div>
-    ${temporaryNotice()}
-    <aside class="recovery-reminder" aria-label="身份恢复提醒">
-      <p>${me.recoveryCode ? '请私下保存你的个人恢复码。换设备或退出后，需要它才能回到同一身份。' : '你的旧身份还没有恢复码。请先在设置中生成并保存，以免退出后无法找回。'}</p>
-      <button class="btn ghost small" id="a-recovery">${me.recoveryCode ? '保存恢复码' : '生成恢复码'}</button>
-    </aside>
+    <header class="topbar"><div><h1 class="title">${roomPage === 'dice' ? '投骰子分账' : '记账汇总'}</h1>
+      <p class="room-code">房间 ${esc(room.code)} · ${ids.length}/${esc(room.capacity || 2)} 人</p></div>
+      <button class="btn plain small" id="a-settings" aria-label="打开设置与个人恢复码">设置</button></header>
+    ${temporaryNotice(true)}
+    <div id="room-page">
+    ${roomPage === 'dice' ? `
     <section class="card roomcard" aria-label="房间成员">
-      <div class="room-heading"><div><div class="code">${esc(room.code)}</div>
-        <p class="hint">房间码 · ${ids.length}/${esc(room.capacity || 2)} 人已加入</p></div>
+      <div class="room-heading"><div><h2 class="title">房间成员</h2>
+        <p class="hint">${ids.filter((id) => P[id].online).length} 人在线 · ${esc(room.faces || 6)} 面骰</p></div>
         ${ids.length < (room.capacity || 2) ? '<button class="btn small" id="a-invite">邀请朋友</button>' : '<span class="hint">房间已满</span>'}
       </div>
       <div class="players">${ids.map((id) => {
@@ -712,6 +772,23 @@ function renderRoom() {
       }).join('')}</div>
       ${ids.length < 2 ? '<p class="hint">再来一位就能开掷。发出邀请，让朋友入座吧。</p>' : ''}
     </section>
+    ${pending ? `<section class="card page-prompt" aria-label="账本操作提醒">
+      <h2>先处理账本提议</h2><p>有还款或账本操作尚未确认，处理完成后才能发起新的分账。</p>
+      <button class="btn ghost" id="a-ledger-pending">前往记账汇总处理</button>
+    </section>` : ''}
+    ${billHtml}
+    ${!busy && ids.length >= 2 ? `<section class="card page-prompt ${recentRecordedId ? 'saved' : ''}" aria-label="发起分账">
+      <h2>${recentRecordedId ? '这笔分账已入账' : '这一笔，让骰子决定'}</h2>
+      <p>${recentRecordedId ? '本笔所需成员已确认，分摊结果已同步到记账汇总。' : '填好金额、选好参与者，一起掷骰决定各自承担多少。'}</p>
+      <button class="btn" id="a-new">发起分账</button>
+      ${recentRecordedId ? '<button class="btn ghost" id="a-view-ledger">查看记账汇总</button>' : ''}
+    </section>` : ''}
+    ` : `
+    ${ledgerHtml}
+    ${room.bill ? `<section class="card page-prompt" aria-label="分账操作提醒">
+      <h2>有一笔分账进行中</h2><p>本笔确认入账前，余额保持不变，暂时不能还款或修改账本。</p>
+      <button class="btn ghost" id="a-dice-pending">返回投骰子分账</button>
+    </section>` : ''}
     <section class="card settle" aria-label="我的结算">
       <div class="k">${net > 0 ? '我还应收回' : net < 0 ? '我还需要支付' : room.history.length ? '我的余额已两清' : '还没有消费记录'}</div>
       <div class="v ${net > 0 ? 'in' : net < 0 ? 'out' : ''}">¥ ${fmt(Math.abs(net))}</div>
@@ -723,9 +800,6 @@ function renderRoom() {
         <div><div class="n">¥ ${fmt(st.paid)}</div><div class="l">我垫付</div></div>
         <div><div class="n">¥ ${fmt(st.share)}</div><div class="l">我承担</div></div></div>
     </section>
-    ${ledgerHtml}
-    ${!busy && ids.length >= 2 ? '<button class="btn" id="a-new">＋ 记一笔，掷骰分账</button>' : ''}
-    ${billHtml}
     <div class="h2">大家的账 <span>按成员汇总 · 实时同步</span></div>
     <p class="hint">还款净额 = 已还出 − 已收回；正数抵扣应付，负数抵扣应收。不是累计转账总额。</p>
     <div class="member-stats">${ids.map((id) => {
@@ -743,9 +817,23 @@ function renderRoom() {
     <div class="h2">${temporaryMode ? '临时账本' : '账本'} <span>${temporaryMode ? '仅最近一笔' : room.history.length + ' 笔消费'}</span></div>
     ${histHtml}
     ${room.repayments.length ? `<div class="h2">还款记录 <span>${temporaryMode ? '仅最近一条明细' : room.repayments.length + ' 笔 · 不计入消费'}</span></div>${repaymentsHtml}` : ''}
+    <aside class="recovery-reminder" aria-label="身份恢复提醒">
+      <p>${me.recoveryCode ? '请私下保存你的个人恢复码。换设备或退出后，需要它才能回到同一身份。' : '你的旧身份还没有恢复码。请先在设置中生成并保存，以免退出后无法找回。'}</p>
+      <button class="btn ghost small" id="a-recovery">${me.recoveryCode ? '保存恢复码' : '生成恢复码'}</button>
+    </aside>
+    `}
+    </div>
+    <nav class="room-nav" aria-label="房间页面">
+      ${[['dice', '投骰子分账', '开账 · 掷骰'], ['ledger', '记账汇总', '结算 · 账本']].map(([page, label, hint]) => {
+        const status = roomPageStatus(page);
+        return `<button id="nav-${page}" data-room-page="${page}" ${roomPage === page ? 'aria-current="page"' : ''} aria-controls="room-page">
+          <span>${label}</span><span class="nav-status ${status.startsWith('待') ? 'attention' : ''}">${status || hint}</span></button>`;
+      }).join('')}
+    </nav>
   `;
   bindRoomEvents();
   if (!$modal.firstElementChild && focusId) document.getElementById(focusId)?.focus({ preventScroll: true });
+  window.scrollTo({ top: scrollY, behavior: 'instant' });
 }
 
 function bindRoomEvents() {
@@ -762,6 +850,10 @@ function bindRoomEvents() {
       toast('邀请已复制，去微信粘贴给 TA');
     } catch (e) { toast('复制失败，手动输入房间码吧: ' + room.code); }
   });
+  $app.querySelectorAll('[data-room-page]').forEach((button) => button.addEventListener('click', () => switchRoomPage(button.dataset.roomPage)));
+  on('a-ledger-pending', () => switchRoomPage('ledger', true));
+  on('a-view-ledger', () => switchRoomPage('ledger', true));
+  on('a-dice-pending', () => switchRoomPage('dice', true));
   on('a-new', () => openBillSheet());
   on('a-repay', () => openRepaymentSheet());
   on('a-settings', () => openSettings());
