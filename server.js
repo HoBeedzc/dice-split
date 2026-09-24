@@ -195,13 +195,14 @@ function passOk(given, req) {
 const needPass = (res) => json(res, 401, { error: 'need-passcode' });
 
 const rateMap = new Map(); // ip -> { start, count }
-function rateLimit(ip) {
+const recoveryRateMap = new Map();
+function rateLimit(key, map = rateMap, limit = RATE_LIMIT) {
   const now = Date.now();
-  let e = rateMap.get(ip);
-  if (!e || now - e.start > 60000) { e = { start: now, count: 0 }; rateMap.set(ip, e); }
+  let e = map.get(key);
+  if (!e || now - e.start > 60000) { e = { start: now, count: 0 }; map.set(key, e); }
   e.count++;
-  if (rateMap.size > 5000) for (const [k, v] of rateMap) if (now - v.start > 60000) rateMap.delete(k);
-  return e.count <= RATE_LIMIT;
+  if (map.size > 5000) for (const [k, v] of map) if (now - v.start > 60000) map.delete(k);
+  return e.count <= limit;
 }
 function clientIp(req) {
   const xff = String(req.headers['x-forwarded-for'] || '').split(',')[0].trim();
@@ -595,12 +596,16 @@ function recoveryHash(code) {
   return crypto.createHash('sha256').update(String(code).replace(/[-\s]/g, '').toUpperCase()).digest('hex');
 }
 
-function newRecoveryCode() {
-  return newToken().toUpperCase().match(/.{8}/g).join('-');
+function newRecoveryCode(players = {}) {
+  const used = new Set(Object.values(players).filter(Boolean).map((player) => player.recoveryHash));
+  for (;;) {
+    const code = String(crypto.randomInt(100000000)).padStart(8, '0');
+    if (!used.has(recoveryHash(code))) return code;
+  }
 }
 
-function makePlayer(name, avatar) {
-  const recoveryCode = newRecoveryCode();
+function makePlayer(name, avatar, players = {}) {
+  const recoveryCode = newRecoveryCode(players);
   return {
     player: { name, avatar, token: newToken(), recoveryHash: recoveryHash(recoveryCode), online: false, _conns: 0 },
     recoveryCode,
@@ -724,7 +729,7 @@ const server = http.createServer(async (req, res) => {
       if (count >= room.capacity) { json(res, 409, { error: 'full' }); return; }
       const role = `p${count + 1}`;
       const { player, recoveryCode } = makePlayer(
-        sanitizeName(body.name, `玩家${count + 1}`), sanitizeAvatar(body.avatar, '🐱')
+        sanitizeName(body.name, `玩家${count + 1}`), sanitizeAvatar(body.avatar, '🐱'), room.players
       );
       room.players[role] = player;
       if (room.phase === 'lobby') room.phase = 'idle';
@@ -737,7 +742,11 @@ const server = http.createServer(async (req, res) => {
       const body = await readBody(req);
       if (!passOk(body.passcode, req)) { needPass(res); return; }
       const current = rooms.get(String(body.code || '').trim().toUpperCase());
-      const hash = recoveryHash(body.recoveryCode || '');
+      // 短数字码按房间限速，不能通过更换 IP 或代理头绕过。
+      if (current && !rateLimit(current.code, recoveryRateMap, 20)) {
+        json(res, 429, { error: '此房间恢复码操作太频繁，请一分钟后重试' }); return;
+      }
+      const hash = typeof body.recoveryCode === 'string' ? recoveryHash(body.recoveryCode) : null;
       const role = current && memberIds(current).find((id) => current.players[id].recoveryHash === hash);
       if (!role) { json(res, 401, { error: '房间号或个人恢复码不正确' }); return; }
       const room = structuredClone(current);
@@ -757,9 +766,20 @@ const server = http.createServer(async (req, res) => {
       const current = rooms.get(String(body.code || '').trim().toUpperCase());
       const role = current && roleOf(current, body.token || '');
       if (!role) { json(res, 401, { error: 'stale' }); return; }
+      const custom = body.recoveryCode !== undefined;
+      if (custom && (typeof body.recoveryCode !== 'string' || !/^[0-9]{8}$/.test(body.recoveryCode))) {
+        json(res, 400, { error: '恢复码必须是 8 位数字' }); return;
+      }
+      if (!rateLimit(current.code, recoveryRateMap, 20)) {
+        json(res, 429, { error: '此房间恢复码操作太频繁，请一分钟后重试' }); return;
+      }
+      const recoveryCode = custom ? body.recoveryCode : newRecoveryCode(current.players);
+      const hash = recoveryHash(recoveryCode);
+      if (memberIds(current).some((id) => current.players[id].recoveryHash === hash)) {
+        json(res, 409, { error: '此恢复码不可用，请换一组 8 位数字' }); return;
+      }
       const room = structuredClone(current);
-      const recoveryCode = newRecoveryCode();
-      room.players[role].recoveryHash = recoveryHash(recoveryCode);
+      room.players[role].recoveryHash = hash;
       touch(room);
       json(res, 200, { recoveryCode });
       return;

@@ -5,10 +5,54 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
+import { createHash } from 'node:crypto';
+import vm from 'node:vm';
 import { isDeepStrictEqual } from 'node:util';
 import { TestServer, memberIds, persistentView, expectedBalance, hasRuntimeFields } from './test-flow.mjs';
 
 const PASS = 'multiplayer-test-pass';
+// Keep this oracle independent of the implementation: legacy normalization is contractual.
+const recoveryDigest = (code) => createHash('sha256').update(String(code).replace(/[-\s]/g, '').toUpperCase()).digest('hex');
+const numericRecovery = (code) => {
+  assert.equal(typeof code, 'string');
+  assert.equal(code.length, 8, 'numeric codes must be exactly eight ASCII digits');
+  assert.match(code, /^[0-9]{8}$/);
+};
+function unusedRecoveryCode(f, start = 123456) {
+  const hashes = new Set(Object.values(JSON.parse(f.bytes())).flatMap((room) => memberIds(room).map((id) => room.players[id].recoveryHash)));
+  while (hashes.has(recoveryDigest(String(start).padStart(8, '0')))) start++;
+  return String(start).padStart(8, '0');
+}
+function recoveryPrivate(f, codes) {
+  const text = f.bytes();
+  const normalized = codes.map((code) => code.replace(/[-\s]/g, '').toUpperCase());
+  for (const code of [...codes, ...normalized]) assert.ok(!text.includes(code), 'plaintext recovery code must not be persisted');
+  const visit = (node) => {
+    if (!node || typeof node !== 'object') return;
+    for (const [key, child] of Object.entries(node)) {
+      assert.notEqual(key, 'recoveryCode', 'disk must contain hashes, never recoveryCode fields');
+      visit(child);
+    }
+  };
+  visit(JSON.parse(text));
+  assert.ok(!hasRuntimeFields(JSON.parse(text)), 'runtime state must not be persisted');
+  const secrets = [...f.secrets, ...codes, ...normalized, ...codes.map(recoveryDigest)];
+  for (const feed of f.server.streams) for (const frame of feed.frames) secretFree(frame, secrets);
+}
+async function recoverySaved(f, before, player, recoveryCode) {
+  numericRecovery(recoveryCode);
+  const saved = f.disk(); // Inspect durability before waiting for the corresponding SSE frame.
+  assert.ok(saved.version > before.version);
+  const expected = structuredClone(before);
+  expected.version = saved.version;
+  expected.players[player.role].recoveryHash = recoveryDigest(recoveryCode);
+  assert.deepEqual(saved, expected, 'setting a code changes only its owner hash and room version');
+  f.secrets.push(recoveryCode, recoveryDigest(recoveryCode));
+  f.state = await f.feed.wait((room) => room.version >= saved.version);
+  assert.deepEqual(persistentView(f.state, true), persistentView(saved));
+  checkBalance(f.state);
+  recoveryPrivate(f, [recoveryCode]);
+}
 const ids = (n) => Array.from({ length: n }, (_, i) => `p${i + 1}`);
 const sum = (values) => values.reduce((a, b) => a + b, 0);
 // Carry may omit zero entries; unlike balance it is a sparse accumulator.
@@ -94,14 +138,21 @@ async function fixture(t, temporary = false, env = {}) {
     assert.equal(player.role, role);
     assert.match(player.code, /^[A-Z2-9]{5}$/);
     assert.ok(typeof player.token === 'string' && player.token.length > 0);
-    assert.ok(typeof player.recoveryCode === 'string' && player.recoveryCode.length > 0);
+    numericRecovery(player.recoveryCode);
     assert.notEqual(player.token, player.recoveryCode);
-    assert.ok(!f.secrets.includes(player.token) && !f.secrets.includes(player.recoveryCode), 'new members need distinct secrets');
-    f.secrets.push(player.token, player.recoveryCode);
+    assert.ok(!f.secrets.includes(player.token), 'new members need distinct tokens');
+    assert.ok(f.players.filter((p) => p.code === player.code).every((p) => p.recoveryCode !== player.recoveryCode), 'new recovery codes must be distinct within their room');
+    f.secrets.push(player.token, player.recoveryCode, recoveryDigest(player.recoveryCode));
     if (!temporary) {
       const room = JSON.parse(f.bytes())[player.code];
       assert.equal(room.players[role].token, player.token, 'identity must persist before response');
-      assert.ok(typeof room.players[role].recoveryHash === 'string' && room.players[role].recoveryHash.length > 0);
+      assert.equal(room.players[role].recoveryHash, recoveryDigest(player.recoveryCode));
+      assert.equal(new Set(memberIds(room).map((id) => room.players[id].recoveryHash)).size, memberIds(room).length);
+      const { token, recoveryCode, ...publicIdentity } = player;
+      secretFree(publicIdentity, f.secrets);
+      for (const secret of f.secrets.filter((value) => value !== token && value !== recoveryCode)) {
+        assert.ok(!JSON.stringify(player).includes(secret), 'identity response must not expose peer secrets or hashes');
+      }
       assert.ok(!f.bytes().includes(player.recoveryCode), 'only recovery hashes may be persisted');
       assert.equal(room.players[role].recoveryCode, undefined);
     }
@@ -375,6 +426,388 @@ test('observers and late joiners cannot roll or vote on a locked persistent bill
   for (const frame of observer.frames.filter((room) => room.phase === 'rolling')) privateBill(frame);
 });
 
+test('custom recovery preserves leading zeroes, token ownership, durability and private state across restart', async (t) => {
+  const f = await fixture(t);
+  await f.create(3);
+  await f.connect();
+  await f.join();
+  await f.join();
+  await f.bill(ids(3), 'p3', 1273);
+  const [p1, p2] = f.players;
+  const peerFeed = await f.server.observe(p2.code, p2.token, PASS);
+  f.state = await f.feed.wait((room) => room.players.p2.online);
+  const custom = unusedRecoveryCode(f);
+  assert.ok(custom.startsWith('0'));
+  const fields = { code: p2.code, token: p2.token, recoveryCode: custom, role: p1.role };
+  await f.fail('/api/recovery', fields);
+  const before = f.disk();
+  const response = success(await f.request('/api/recovery', fields), 'custom leading-zero recovery code');
+  assert.deepEqual(response, { recoveryCode: custom }, 'only the authenticated caller receives their plaintext code');
+  await recoverySaved(f, before, p2, custom);
+  await peerFeed.wait((room) => room.version >= f.disk().version);
+  assert.ok(!peerFeed.ended, 'changing a recovery code must not revoke its owner token or streams');
+  assert.equal((await f.rejectRequest('/api/recover', { code: p2.code, recoveryCode: p2.recoveryCode })).status, 401);
+  for (const player of f.players) {
+    const ping = success(await f.get('/api/ping', { code: player.code, token: player.token }), 'unchanged token');
+    assert.equal(ping.role, player.role);
+    secretFree(ping, f.secrets);
+  }
+  const durable = f.disk();
+  recoveryPrivate(f, [custom, ...f.players.map((p) => p.recoveryCode)]);
+  await f.restart();
+  assert.deepEqual(f.disk(), durable, 'restart must not rewrite hashes, tokens or ledger');
+  assert.deepEqual(ledger(f.state), ledger({ ...durable, balance: expectedBalance(durable) }));
+  await f.change(p2, 'setMe', { name: 'Same identity' });
+  assert.equal(f.disk().players.p2.recoveryHash, recoveryDigest(custom));
+  assert.equal(f.disk().players.p2.token, p2.token);
+  assert.equal((await f.rejectRequest('/api/recover', { code: p2.code, recoveryCode: p2.recoveryCode })).status, 401);
+  const beforeRecover = f.disk();
+  const recovered = success(await f.request('/api/recover', { code: p2.code, recoveryCode: custom, role: p1.role }), 'custom code after restart');
+  assert.equal(recovered.role, p2.role);
+  assert.equal(recovered.code, p2.code);
+  assert.equal(recovered.recoveryCode, custom);
+  assert.notEqual(recovered.token, p2.token);
+  const afterRecover = f.disk();
+  assert.deepEqual(afterRecover, {
+    ...beforeRecover, version: afterRecover.version,
+    players: { ...beforeRecover.players, p2: { ...beforeRecover.players.p2, token: recovered.token } },
+  });
+  f.secrets.push(recovered.token);
+  f.players[1] = recovered;
+  f.state = await f.feed.wait((room) => room.version >= afterRecover.version);
+  assert.equal((await f.get('/api/ping', { code: p2.code, token: p2.token })).status, 401);
+  const beforeReset = f.disk();
+  const reset = success(await f.request('/api/recovery', { code: recovered.code, token: recovered.token, role: p1.role }), 'automatic reset');
+  assert.notEqual(reset.recoveryCode, custom);
+  assert.ok(f.players.every((p) => p.recoveryCode !== reset.recoveryCode));
+  await recoverySaved(f, beforeReset, recovered, reset.recoveryCode);
+  assert.equal((await f.rejectRequest('/api/recover', { code: p2.code, recoveryCode: custom })).status, 401);
+  recoveryPrivate(f, [custom, reset.recoveryCode, p2.recoveryCode]);
+});
+
+test('custom recovery rejects non-string and non-ASCII eight-digit formats without changing state', async (t) => {
+  const f = await fixture(t);
+  const p1 = await f.create();
+  await f.connect();
+  await f.join();
+  const invalid = [null, 12345678, ['00123456'], [], {}, true, '', '1234567', '123456789',
+    'abcdefgh', '１２３４５６７８', '١٢٣٤٥٦٧٨', ' 12345678', '12345678 ', '1234 5678', '1234-5678', '12345678\n', '\t12345678'];
+  for (const recoveryCode of invalid) {
+    const response = await f.rejectRequest('/api/recovery', { code: p1.code, token: p1.token, recoveryCode });
+    assert.equal(response.status, 400, `invalid custom format: ${JSON.stringify(recoveryCode)}`);
+    secretFree(response.data, f.secrets);
+  }
+  const before = f.disk();
+  const custom = unusedRecoveryCode(f);
+  const result = success(await f.request('/api/recovery', { code: p1.code, token: p1.token, recoveryCode: custom }), 'valid code after format errors');
+  assert.deepEqual(result, { recoveryCode: custom });
+  await recoverySaved(f, before, p1, custom);
+});
+
+test('custom recovery rejects every occupied room code and atomically resolves concurrent claims', async (t) => {
+  const f = await fixture(t);
+  await f.create(8);
+  await f.connect();
+  while (f.players.length < 8) await f.join();
+  const p1 = f.players[0];
+  for (const owner of f.players) {
+    const response = await f.rejectRequest('/api/recovery', {
+      code: p1.code, token: p1.token, role: owner.role, recoveryCode: owner.recoveryCode,
+    });
+    assert.equal(response.status, 409, 'even own or offline members\' codes are conflicts');
+    secretFree(response.data, f.secrets);
+  }
+  const custom = unusedRecoveryCode(f);
+  const before = f.disk();
+  const contenders = [f.players[1], f.players[7]];
+  const results = await Promise.all(contenders.map((player) => f.request('/api/recovery', {
+    code: player.code, token: player.token, recoveryCode: custom, role: p1.role,
+  })));
+  assert.deepEqual(results.map((r) => r.status).sort(), [200, 409]);
+  const winner = contenders[results.findIndex((r) => r.status === 200)];
+  const loser = contenders[results.findIndex((r) => r.status === 409)];
+  assert.deepEqual(results.find((r) => r.status === 200).data, { recoveryCode: custom });
+  secretFree(results.find((r) => r.status === 409).data, [...f.secrets, custom]);
+  await recoverySaved(f, before, winner, custom);
+  assert.equal(f.disk().version, f.state.version);
+  assert.equal(memberIds(f.disk()).filter((id) => f.disk().players[id].recoveryHash === recoveryDigest(custom)).length, 1);
+  assert.equal((await f.rejectRequest('/api/recovery', { code: loser.code, token: loser.token, recoveryCode: custom })).status, 409);
+  assert.equal((await f.rejectRequest('/api/recover', { code: winner.code, recoveryCode: winner.recoveryCode })).status, 401);
+  const recovered = success(await f.request('/api/recover', { code: winner.code, recoveryCode: custom, role: loser.role }), 'concurrent winner owns the code');
+  assert.equal(recovered.role, winner.role);
+  assert.equal(f.disk().players[loser.role].token, loser.token);
+  assert.equal(f.disk().players[loser.role].recoveryHash, before.players[loser.role].recoveryHash);
+  assert.equal(success(await f.get('/api/ping', { code: loser.code, token: loser.token }), 'loser token remains valid').role, loser.role);
+  f.state = await f.feed.wait((room) => room.version >= f.disk().version);
+  recoveryPrivate(f, [custom, ...f.players.map((p) => p.recoveryCode)]);
+});
+
+test('identical custom recovery codes are allowed across rooms but tokens are room-bound', async (t) => {
+  const f = await fixture(t);
+  const first = await f.create();
+  await f.connect();
+  const other = f.identity(await f.request('/api/create', { name: 'Other room' }), 'p1');
+  const second = f.identity(await f.request('/api/join', { code: other.code, name: 'Other member' }), 'p2');
+  const custom = unusedRecoveryCode(f);
+  for (const token of [undefined, '', 'invalid-token', other.token, second.token]) {
+    for (const extra of [{}, { recoveryCode: custom }]) {
+      assert.equal((await f.rejectRequest('/api/recovery', { code: first.code, token, role: first.role, ...extra })).status, 401);
+    }
+  }
+  const before = f.disk();
+  assert.deepEqual(success(await f.request('/api/recovery', { code: first.code, token: first.token, recoveryCode: custom }), 'first room custom code'), { recoveryCode: custom });
+  await recoverySaved(f, before, first, custom);
+  const firstSaved = f.disk();
+  const otherSaved = JSON.parse(f.bytes())[second.code];
+  assert.deepEqual(success(await f.request('/api/recovery', { code: second.code, token: second.token, recoveryCode: custom }), 'second room identical code'), { recoveryCode: custom });
+  const secondSaved = JSON.parse(f.bytes())[second.code];
+  assert.deepEqual(f.disk(), firstSaved);
+  assert.deepEqual(secondSaved, {
+    ...otherSaved, version: secondSaved.version,
+    players: { ...otherSaved.players, p2: { ...otherSaved.players.p2, recoveryHash: recoveryDigest(custom) } },
+  });
+  f.feed.expectServerClose();
+  for (const player of [first, second]) {
+    const recovered = success(await f.request('/api/recover', { code: player.code, recoveryCode: custom, role: 'p8' }), 'room-scoped recovery');
+    assert.equal(recovered.role, player.role);
+    assert.equal(recovered.code, player.code);
+    assert.equal(recovered.recoveryCode, custom);
+    assert.notEqual(recovered.token, player.token);
+  }
+  await f.feed.waitForServerClose();
+  recoveryPrivate(f, [custom, first.recoveryCode, second.recoveryCode]);
+});
+
+for (const legacy of ['0123456789ABCDEF', '0123456789ABCDEFFEDCBA9876543210']) {
+  test(`legacy ${legacy.length}-hex recovery keeps old hashes/tokens until explicit recovery or reset`, async (t) => {
+    const f = await fixture(t);
+    await f.create();
+    await f.connect();
+    await f.join();
+    await f.bill(ids(2), 'p1', 1037);
+    const [p1, p2] = f.players;
+    await f.server.stop('SIGKILL');
+    const data = JSON.parse(f.bytes());
+    data[p1.code].players.p2.recoveryHash = recoveryDigest(legacy);
+    writeFileSync(f.file, JSON.stringify(data));
+    const original = f.bytes();
+    const grouped = legacy.match(/.{8}/g).join('-');
+    f.secrets.push(legacy, grouped, recoveryDigest(legacy));
+    await f.launch();
+    await f.connect();
+    assert.equal(f.bytes(), original, 'startup must not rewrite legacy credentials');
+    for (const player of f.players) assert.equal((await f.get('/api/ping', { code: player.code, token: player.token })).status, 200);
+    await f.change(p2, 'setMe', { name: 'Legacy token' });
+    assert.equal(f.disk().players.p2.token, p2.token);
+    assert.equal(f.disk().players.p2.recoveryHash, recoveryDigest(legacy));
+    const saved = f.disk();
+    await f.restart();
+    assert.deepEqual(f.disk(), saved);
+    const recovered = success(await f.request('/api/recover', {
+      code: p2.code, recoveryCode: ` \t${legacy.toLowerCase().match(/.{4}/g).join(' - ')}\n`, role: p1.role,
+    }), 'legacy normalization and grouping');
+    assert.equal(recovered.role, p2.role);
+    assert.equal(recovered.recoveryCode, grouped);
+    assert.notEqual(recovered.token, p2.token);
+    assert.equal(f.disk().players.p2.recoveryHash, recoveryDigest(legacy), 'recovering an old code must not migrate its hash');
+    assert.equal(f.disk().players.p1.token, p1.token);
+    assert.deepEqual(persistentView(f.disk()), persistentView(saved));
+    assert.equal((await f.get('/api/ping', { code: p2.code, token: p2.token })).status, 401);
+    f.players[1] = recovered;
+    f.secrets.push(recovered.token);
+    f.state = await f.feed.wait((room) => room.version >= f.disk().version);
+    await f.change(recovered, 'setMe', { name: 'Recovered legacy' });
+    const beforeRestart = f.disk();
+    await f.restart();
+    assert.deepEqual(f.disk(), beforeRestart);
+    assert.equal((await f.get('/api/ping', { code: recovered.code, token: recovered.token })).status, 200);
+    const beforeReset = f.disk();
+    const reset = success(await f.request('/api/recovery', { code: recovered.code, token: recovered.token }), 'explicit legacy reset');
+    await recoverySaved(f, beforeReset, recovered, reset.recoveryCode);
+    for (const recoveryCode of [legacy, grouped.toLowerCase()]) {
+      assert.equal((await f.rejectRequest('/api/recover', { code: p2.code, recoveryCode })).status, 401);
+    }
+    const again = success(await f.request('/api/recover', { code: p2.code, recoveryCode: reset.recoveryCode }), 'numeric replacement authenticates');
+    assert.equal(again.role, 'p2');
+    assert.equal(again.recoveryCode, reset.recoveryCode);
+    f.state = await f.feed.wait((room) => room.version >= f.disk().version);
+    recoveryPrivate(f, [legacy, grouped, reset.recoveryCode]);
+  });
+}
+
+test('recover and recovery share a 20-request room budget after authentication/format checks, not spoofed IPs', async (t) => {
+  const f = await fixture(t);
+  await f.create();
+  await f.connect();
+  await f.join();
+  await f.bill(ids(2), 'p1', 1301);
+  const [p1, p2] = f.players;
+  const bytes = f.bytes();
+  const index = f.feed.frames.length;
+  const custom = unusedRecoveryCode(f);
+  const post = (url, fields, attempt = 0) => f.server.request('POST', url, { passcode: PASS, ...fields }, {
+    'X-Forwarded-For': `198.51.100.${attempt + 1}`,
+    'X-Real-IP': `203.0.113.${attempt + 1}`,
+    Forwarded: `for=192.0.2.${attempt + 1}`,
+  });
+  // More than a complete room budget of each pre-validation failure: none may consume it.
+  for (let i = 0; i < 21; i++) {
+    for (const [url, fields, status] of [
+      ['/api/recover', { code: p1.code, recoveryCode: p1.recoveryCode, passcode: 'wrong-passcode' }, 401],
+      ['/api/recover', { code: 'INVALID', recoveryCode: p1.recoveryCode }, 401],
+      ['/api/recovery', { code: p1.code, token: 'wrong-token', recoveryCode: custom }, 401],
+      ['/api/recovery', { code: p1.code, token: p1.token, recoveryCode: i % 2 ? null : '1234-5678' }, 400],
+    ]) {
+      const response = await post(url, fields, i);
+      assert.equal(response.status, status, `${url} must validate before counting`);
+      secretFree(response.data, f.secrets);
+      assert.equal(f.bytes(), bytes);
+    }
+  }
+  await f.feed.noEventsSince(index);
+  assert.deepEqual(f.feed.latest, f.state);
+  // Successes count too, and recover must not refresh the shared room budget when rotating a token.
+  const beforeSet = f.disk();
+  assert.deepEqual(success(await post('/api/recovery', { code: p1.code, token: p1.token, recoveryCode: custom }), 'budget request 1'), { recoveryCode: custom });
+  await recoverySaved(f, beforeSet, p1, custom);
+  const recovered = success(await post('/api/recover', { code: p2.code, recoveryCode: p2.recoveryCode }, 1), 'budget request 2');
+  assert.equal(recovered.role, p2.role);
+  assert.notEqual(recovered.token, p2.token);
+  f.players[1] = recovered;
+  f.secrets.push(recovered.token);
+  f.state = await f.feed.wait((room) => room.version >= f.disk().version);
+  const limitedBytes = f.bytes();
+  const limitedState = structuredClone(f.state);
+  const limitedIndex = f.feed.frames.length;
+  for (let i = 2; i < 20; i++) {
+    const code = i % 2 ? ` ${p1.code.toLowerCase()} ` : p1.code;
+    const response = i % 2
+      ? await post('/api/recovery', { code, token: p1.token, recoveryCode: p2.recoveryCode }, i)
+      : await post('/api/recover', { code, recoveryCode: i === 2 ? null : 'not-a-recovery-code' }, i);
+    assert.equal(response.status, i % 2 ? 409 : 401, `request ${i + 1} still has room budget`);
+    assert.equal(f.bytes(), limitedBytes);
+    secretFree(response.data, f.secrets);
+  }
+  for (const [url, fields] of [
+    ['/api/recover', { code: p1.code, recoveryCode: custom }],
+    ['/api/recovery', { code: p1.code, token: p1.token }],
+    ['/api/recovery', { code: p2.code.toLowerCase(), token: recovered.token, recoveryCode: unusedRecoveryCode(f) }],
+    ['/api/recover', { code: p2.code, recoveryCode: p2.recoveryCode }],
+  ]) {
+    const response = await post(url, fields, 99);
+    assert.equal(response.status, 429, 'both paths and all members share the exhausted room budget');
+    assert.equal(f.bytes(), limitedBytes, '429 cannot change hashes, tokens, ledger or version');
+    secretFree(response.data, f.secrets);
+  }
+  assert.equal((await post('/api/recovery', { code: p1.code, token: 'wrong-token', recoveryCode: custom })).status, 401);
+  assert.equal((await post('/api/recovery', { code: p1.code, token: p1.token, recoveryCode: '' })).status, 400);
+  await f.feed.noEventsSince(limitedIndex);
+  assert.deepEqual(f.feed.latest, limitedState);
+  for (const player of [p1, recovered]) {
+    assert.equal(success(await f.get('/api/ping', { code: player.code, token: player.token }), 'ping is not recovery-limited').role, player.role);
+  }
+  await f.change(recovered, 'setMe', { name: 'Actions still work' });
+  assert.deepEqual(ledger(f.state), ledger(limitedState));
+  const limitedRoom = f.disk();
+  const other = f.identity(await f.request('/api/create', { name: 'Independent budget' }), 'p1');
+  const otherCode = unusedRecoveryCode(f);
+  assert.deepEqual(success(await post('/api/recovery', { code: other.code, token: other.token, recoveryCode: otherCode }), 'other room reset'), { recoveryCode: otherCode });
+  const otherRecovered = success(await post('/api/recover', { code: other.code, recoveryCode: otherCode }), 'other room recovery');
+  assert.equal(otherRecovered.role, 'p1');
+  assert.equal(otherRecovered.code, other.code);
+  assert.deepEqual(f.disk(), limitedRoom, 'other room operations cannot change the limited room');
+  recoveryPrivate(f, [custom, otherCode, p2.recoveryCode]);
+});
+
+test('concurrent recovery attempts cannot exceed the shared room budget or mutate rejected state', async (t) => {
+  const f = await fixture(t);
+  const p1 = await f.create();
+  await f.connect();
+  await f.join();
+  const bytes = f.bytes();
+  const state = structuredClone(f.state);
+  const index = f.feed.frames.length;
+  const responses = await Promise.all(Array.from({ length: 24 }, (_, i) => f.request(
+    i % 2 ? '/api/recover' : '/api/recovery',
+    i % 2 ? { code: p1.code, recoveryCode: 'invalid' }
+      : { code: p1.code, token: p1.token, recoveryCode: p1.recoveryCode },
+  )));
+  assert.equal(responses.filter((r) => r.status === 429).length, 4);
+  assert.equal(responses.filter((r) => r.status === 401 || r.status === 409).length, 20);
+  for (const response of responses) secretFree(response.data, f.secrets);
+  assert.equal(f.bytes(), bytes);
+  await f.feed.noEventsSince(index);
+  assert.deepEqual(f.feed.latest, state);
+  assert.equal((await f.get('/api/ping', { code: p1.code, token: p1.token })).status, 200);
+});
+
+// Extract only pure helpers into a VM: deterministic randomness/time without production hooks or files.
+function serverHelpers(start, end, globals) {
+  const source = readFileSync(new URL('../server.js', import.meta.url), 'utf8');
+  const first = source.indexOf(start);
+  const last = source.indexOf(end, first);
+  assert.ok(first >= 0 && last > first, `server helper boundaries: ${start}`);
+  const context = vm.createContext(globals);
+  vm.runInContext(source.slice(first, last), context, { timeout: 1000 });
+  return context;
+}
+
+test('numeric recovery generation keeps zeroes and retries collisions against every existing hash', () => {
+  const draws = [0, 1, 42, 1234, 42, 99999999, 7, 0];
+  const context = serverHelpers('function recoveryHash(', 'function makeRoom(', {
+    crypto: {
+      createHash,
+      randomInt: (...args) => {
+        assert.deepEqual(args, [100000000], 'sample the complete eight-digit space using cryptographic randomness');
+        assert.ok(draws.length, 'unexpected extra random draw');
+        return draws.shift();
+      },
+    },
+    newToken: () => 'deterministic-token',
+    players: {
+      p1: { recoveryHash: recoveryDigest('00000000') },
+      p2: null,
+      p3: { recoveryHash: recoveryDigest('00000001') },
+      p8: { recoveryHash: recoveryDigest('00000042') },
+    },
+  });
+  const before = structuredClone(context.players);
+  const code = vm.runInContext('newRecoveryCode(players)', context, { timeout: 1000 });
+  assert.equal(code, '00001234');
+  assert.deepEqual(context.players, before, 'collision retry must not mutate existing members');
+  const joined = vm.runInContext('makePlayer("New member", "", players)', context, { timeout: 1000 });
+  assert.equal(joined.recoveryCode, '99999999');
+  assert.equal(joined.player.recoveryHash, recoveryDigest('99999999'));
+  assert.equal(vm.runInContext('newRecoveryCode()', context, { timeout: 1000 }), '00000007');
+  assert.equal(vm.runInContext('newRecoveryCode()', context, { timeout: 1000 }), '00000000');
+  assert.deepEqual(draws, []);
+  for (const legacy of ['abcd ef01-2345\t6789', '01234567-89abcdef-01234567-89abcdef']) {
+    context.input = legacy;
+    assert.equal(vm.runInContext('recoveryHash(input)', context), recoveryDigest(legacy));
+  }
+});
+
+test('room recovery limiter restores its 20-attempt allowance after a 60-second window', () => {
+  let now = 1700000000000;
+  const context = serverHelpers('const rateMap =', 'function clientIp(', {
+    RATE_LIMIT: 100000,
+    Date: { now: () => now },
+  });
+  const attempt = (room = 'ROOM1') => {
+    context.roomKey = room;
+    return vm.runInContext('rateLimit(roomKey, recoveryRateMap, 20)', context);
+  };
+  for (let i = 0; i < 20; i++) assert.equal(attempt(), true);
+  assert.equal(attempt(), false);
+  now += 59999;
+  assert.equal(attempt(), false, 'budget must last the full minute');
+  assert.equal(attempt('ROOM2'), true, 'other rooms have independent windows');
+  assert.equal(vm.runInContext('rateLimit("ROOM1")', context), true, 'general API rate map is separate');
+  now += 2;
+  for (let i = 0; i < 20; i++) assert.equal(attempt(), true);
+  assert.equal(attempt(), false);
+});
+
 test('recovery rotates only the matching identity, revokes live streams, and supports resetting the secret', async (t) => {
   const f = await fixture(t);
   await f.create(3);
@@ -435,7 +868,7 @@ test('recovery rotates only the matching identity, revokes live streams, and sup
   assert.equal(success(await f.get('/api/ping', { code: otherRoom.code, token: otherRoom.token }), 'other room identity').role, 'p1');
   const originalHash = f.disk().players.p2.recoveryHash;
   const reset = success(await f.request('/api/recovery', { code: result.code, token: result.token }), 'replace recovery secret');
-  assert.ok(typeof reset.recoveryCode === 'string' && reset.recoveryCode.length > 0);
+  numericRecovery(reset.recoveryCode);
   assert.notEqual(reset.recoveryCode, result.recoveryCode);
   assert.notEqual(f.disk().players.p2.recoveryHash, originalHash);
   assert.equal(f.disk().players.p2.token, result.token, 'resetting recovery code does not rotate the authenticated token');
@@ -630,7 +1063,7 @@ for (const type of ['repay', 'deleteRepayment', 'deleteHistory', 'clearHistory']
     proposal(f.state.ledgerPending, ['p1', 'p2'], ['p1'], type);
     assert.equal(f.state.ledgerPending.id, 'legacy-proposal');
     const reset = success(await f.request('/api/recovery', { code: p1.code, token: p1.token }), 'legacy authenticated recovery setup');
-    assert.ok(typeof reset.recoveryCode === 'string' && reset.recoveryCode.length > 0);
+    numericRecovery(reset.recoveryCode);
     assert.equal(f.disk().players.p1.token, p1.token);
     assert.equal(f.disk().players.p2.token, p2.token);
     assert.equal(typeof f.disk().players.p1.recoveryHash, 'string');

@@ -1039,12 +1039,24 @@ function openSettings(initialFocus = 's-name') {
         <p class="hint">房间码 <b>${esc(room.code)}</b> · 成员编号 <b>${esc(r)}</b><br>编号不会随昵称或设备改变。恢复身份只需房间码和你自己的恢复码。</p>
         <label for="s-recovery">我的恢复码 · 请保密，不要发到群里</label>
         <input type="text" id="s-recovery" class="recovery-code" readonly value="${esc(me.recoveryCode || '')}" placeholder="此设备尚无恢复码，请先生成" autocomplete="off" spellcheck="false">
-        <div class="button-row">
-          <button class="btn ghost small" id="s-recovery-copy" ${me.recoveryCode ? '' : 'disabled'}>复制恢复码</button>
-          <button class="btn ghost small" id="s-recovery-save" ${me.recoveryCode ? '' : 'disabled'}>保存恢复文件</button>
+        <div id="s-recovery-actions">
+          <div class="button-row">
+            <button class="btn ghost small" id="s-recovery-copy" ${me.recoveryCode ? '' : 'disabled'}>复制恢复码</button>
+            <button class="btn ghost small" id="s-recovery-save" ${me.recoveryCode ? '' : 'disabled'}>保存恢复文件</button>
+          </div>
+          <div class="button-row" style="margin-top:12px">
+            <button class="btn plain small" id="s-recovery-reset">${me.recoveryCode ? '重置恢复码' : '生成个人恢复码'}</button>
+            <button class="btn plain small" id="s-recovery-custom">自定义</button>
+          </div>
         </div>
-        <button class="btn plain small" id="s-recovery-reset" style="margin-top:12px">${me.recoveryCode ? '重置恢复码' : '生成个人恢复码'}</button>
-        <p class="hint">恢复会使原设备登录失效；重置后旧恢复码立即失效，请重新保存。拥有此码即可恢复你的身份，请私下妥善保管。${temporaryMode ? '<br>临时房间若已销毁，恢复码也无法找回房间或账本。' : ''}</p>
+        <div id="s-recovery-edit" hidden>
+          <p class="hint" id="s-recovery-hint">请输入 8 位数字，可用 0 开头。请避免生日、连续或重复数字。</p>
+          <div class="button-row">
+            <button class="btn small" id="s-recovery-custom-save">覆盖保存</button>
+            <button class="btn plain small" id="s-recovery-cancel">取消</button>
+          </div>
+        </div>
+        <p class="hint">旧恢复码继续有效，覆盖或重置后旧码立即失效，请重新保存。恢复身份会使原设备登录失效，请私下保管此码。${temporaryMode ? '<br>临时房间若已销毁，恢复码也无法找回房间或账本。' : ''}</p>
         <h4>账本管理</h4>
         <p class="hint">清空消费、还款明细和还款净额汇总，需要所有已加入的成员同意。</p>
         <div class="button-row">
@@ -1081,7 +1093,8 @@ function openSettings(initialFocus = 's-name') {
     api('/api/action', { code: identity.code, token: identity.token, type: 'setFaces', faces: f })
       .catch((e) => { setOn(cur); toast(e.message); });
   }));
-  document.getElementById('s-recovery').addEventListener('click', (e) => e.currentTarget.select());
+  const recoveryInput = document.getElementById('s-recovery');
+  recoveryInput.addEventListener('click', () => { if (recoveryInput.readOnly) recoveryInput.select(); });
   document.getElementById('s-recovery-copy').addEventListener('click', async () => {
     try { await navigator.clipboard.writeText(identity.recoveryCode); toast('个人恢复码已复制，请私下保存'); }
     catch (e) { document.getElementById('s-recovery')?.select(); toast('无法自动复制，请手动复制已选中的恢复码'); }
@@ -1095,17 +1108,62 @@ function openSettings(initialFocus = 's-name') {
     setTimeout(() => URL.revokeObjectURL(url), 1000);
     toast('已请求下载，请确认保存恢复文件');
   });
-  document.getElementById('s-recovery-reset').addEventListener('click', async (e) => {
-    if (identity.recoveryCode && !confirm('重置会立即作废旧恢复码。请在重置后重新复制或保存，继续吗？')) return;
-    const button = e.currentTarget;
-    button.disabled = true;
+  const recoveryReset = document.getElementById('s-recovery-reset');
+  const recoveryCustom = document.getElementById('s-recovery-custom');
+  const recoverySave = document.getElementById('s-recovery-custom-save');
+  const recoveryCancel = document.getElementById('s-recovery-cancel');
+  const recoveryButtons = [recoveryReset, recoveryCustom, recoverySave, recoveryCancel];
+  let recoveryBusy = false;
+  const setRecoveryEditing = (editing) => {
+    recoveryInput.readOnly = !editing;
+    recoveryInput.value = editing && !/^[0-9]{8}$/.test(identity.recoveryCode || '') ? '' : identity.recoveryCode || '';
+    recoveryInput.placeholder = editing ? '输入 8 位数字' : '此设备尚无恢复码，请先生成';
+    for (const [name, value] of Object.entries({ maxlength: '8', inputmode: 'numeric', pattern: '[0-9]{8}', 'aria-describedby': 's-recovery-hint' })) {
+      if (editing) recoveryInput.setAttribute(name, value);
+      else recoveryInput.removeAttribute(name);
+    }
+    document.getElementById('s-recovery-actions').hidden = editing;
+    document.getElementById('s-recovery-edit').hidden = !editing;
+    recoveryReset.textContent = identity.recoveryCode ? '重置恢复码' : '生成个人恢复码';
+    document.getElementById('s-recovery-copy').disabled = !identity.recoveryCode;
+    document.getElementById('s-recovery-save').disabled = !identity.recoveryCode;
+  };
+  setRecoveryEditing(false);
+  recoveryCustom.addEventListener('click', () => {
+    if (recoveryBusy) return;
+    setRecoveryEditing(true); recoveryInput.focus(); recoveryInput.select();
+  });
+  recoveryCancel.addEventListener('click', () => {
+    if (recoveryBusy) return;
+    setRecoveryEditing(false); recoveryCustom.focus();
+  });
+  const updateRecovery = async (recoveryCode) => {
+    if (recoveryBusy) return;
+    if (identity.recoveryCode && !confirm('更换会立即作废旧恢复码。请在更换后重新复制或保存，继续吗？')) return;
+    recoveryBusy = true;
+    recoveryButtons.forEach((button) => { button.disabled = true; });
+    recoveryInput.disabled = true;
     try {
-      const d = await api('/api/recovery', { code: identity.code, token: identity.token });
+      const d = await api('/api/recovery', { code: identity.code, token: identity.token, ...(recoveryCode === undefined ? {} : { recoveryCode }) });
       if (me !== identity) return;
       me.recoveryCode = d.recoveryCode; saveMe();
-      renderRoom(); openSettings('s-recovery');
+      renderRoom(); setRecoveryEditing(false);
       toast('恢复码已更新，请重新保存');
-    } catch (err) { button.disabled = false; toast(err.message); }
+    } catch (err) { toast(err.message); }
+    finally {
+      recoveryBusy = false;
+      recoveryButtons.forEach((button) => { button.disabled = false; });
+      recoveryInput.disabled = false;
+      if (me === identity) recoveryInput.focus();
+    }
+  };
+  recoveryReset.addEventListener('click', () => { if (recoveryInput.readOnly) return updateRecovery(); });
+  recoverySave.addEventListener('click', () => {
+    if (recoveryBusy || recoveryInput.readOnly) return;
+    if (!/^[0-9]{8}$/.test(recoveryInput.value)) {
+      toast('恢复码必须是 8 位数字'); recoveryInput.focus(); return;
+    }
+    return updateRecovery(recoveryInput.value);
   });
   document.getElementById('s-clear').addEventListener('click', function () {
     if (ledgerBusy()) { toast('请等待当前分账或账本提议完成'); return; }

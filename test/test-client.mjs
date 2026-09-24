@@ -420,3 +420,144 @@ test('退出重置页面、滚动位置与展开状态，新房间从投骰页�
   assert.equal(c.context.recentRecordedId, null);
   assert.equal(c.context.expandedHistory.size, 0);
 });
+
+function settingsClient() {
+  const c = roomClient();
+  const requests = [], messages = [];
+  const modal = { innerHTML: '', querySelectorAll: () => [] };
+  for (const id of ['s-name', 's-recovery', 's-recovery-copy', 's-recovery-save', 's-recovery-reset', 's-recovery-custom', 's-recovery-custom-save', 's-recovery-cancel', 's-recovery-actions', 's-recovery-edit', 's-clear', 's-leave', 's-close']) {
+    c.elements.set(id, {
+      value: '', disabled: false, attributes: {},
+      addEventListener(event, callback) { this[event] = callback; },
+      focus() { c.context.document.activeElement = this; },
+      select() { this.selected = true; },
+      setAttribute(name, value) { this.attributes[name] = value; },
+      removeAttribute(name) { delete this.attributes[name]; },
+    });
+  }
+  Object.assign(c.context, {
+    $modal: modal, AVATARS: [], confirm: () => true,
+    toast: (message) => messages.push(message),
+    saveMe: () => { c.saved = c.context.me.recoveryCode; },
+    renderRoom: () => {}, setupModal: (id) => { c.focus = id; },
+    closeModal: () => {},
+    api: async (url, body) => { requests.push({ url, ...body }); return { recoveryCode: body.recoveryCode ?? '87654321' }; },
+  });
+  c.context.me.token = 'test-token';
+  vm.runInContext(html.slice(html.indexOf('function openSettings('), html.indexOf('let modalReturnFocus')), c.context);
+  c.context.openSettings();
+  return { ...c, modal, requests, messages, result: c };
+}
+
+test('恢复码只用一个输入框，默认只读，取消编辑完整保留旧码', async () => {
+  const c = settingsClient();
+  c.context.me.recoveryCode = '01234567-89ABCDEF';
+  c.context.openSettings();
+  const input = c.elements.get('s-recovery');
+  assert.equal((c.modal.innerHTML.match(/<input[^>]*class="recovery-code"/g) || []).length, 1);
+  assert.equal(input.readOnly, true);
+  assert.equal(input.value, '01234567-89ABCDEF');
+  assert.equal(input.attributes.maxlength, undefined);
+  assert.equal(c.elements.get('s-recovery-actions').hidden, false);
+  assert.equal(c.elements.get('s-recovery-edit').hidden, true);
+  assert.match(c.modal.innerHTML, /旧恢复码继续有效/);
+  await c.elements.get('s-recovery-custom').click();
+  assert.equal(input.readOnly, false);
+  assert.equal(input.value, '', 'legacy code must not be silently truncated into a new code');
+  assert.equal(input.attributes.maxlength, '8');
+  assert.equal(input.attributes.inputmode, 'numeric');
+  assert.equal(input.attributes.pattern, '[0-9]{8}');
+  assert.equal(c.elements.get('s-recovery-actions').hidden, true);
+  assert.equal(c.elements.get('s-recovery-edit').hidden, false);
+  input.value = '00123456';
+  await c.elements.get('s-recovery-cancel').click();
+  assert.equal(input.readOnly, true);
+  assert.equal(input.value, '01234567-89ABCDEF');
+  assert.equal(input.attributes.maxlength, undefined);
+  assert.equal(c.context.me.recoveryCode, '01234567-89ABCDEF');
+  assert.equal(c.context.document.activeElement, c.elements.get('s-recovery-custom'));
+  const restoreInput = html.match(/<input[^>]*id="f-recovery"[^>]*>/)[0];
+  assert.doesNotMatch(restoreInput, /maxlength="8"|pattern=|type="number"/);
+  assert.equal(c.requests.length, 0);
+});
+
+test('自定义恢复码校验失败不提交，前导零作为字符串保存', async () => {
+  const c = settingsClient();
+  const input = c.elements.get('s-recovery'), button = c.elements.get('s-recovery-custom-save');
+  await c.elements.get('s-recovery-custom').click();
+  for (const invalid of ['', '1234567', '123456789', '1234567a', '１２３４５６７８', ' 12345678', '1234-5678']) {
+    input.value = invalid;
+    await button.click();
+    assert.equal(c.requests.length, 0);
+    assert.equal(c.context.document.activeElement, input);
+    assert.match(c.messages.at(-1), /8 位数字/);
+  }
+  input.value = '00123456';
+  await button.click();
+  assert.deepEqual(c.requests, [{ url: '/api/recovery', code: 'TEST1', token: 'test-token', recoveryCode: '00123456' }]);
+  assert.equal(c.context.me.recoveryCode, '00123456');
+  assert.equal(c.result.saved, '00123456');
+  assert.equal(input.value, '00123456');
+  assert.equal(input.readOnly, true);
+  assert.equal(c.elements.get('s-recovery-actions').hidden, false);
+  assert.equal(c.elements.get('s-recovery-edit').hidden, true);
+  assert.equal(c.context.document.activeElement, input);
+});
+
+test('取消更换不发送请求，随机重置不携带草稿并保持只读', async () => {
+  const c = settingsClient();
+  const input = c.elements.get('s-recovery');
+  await c.elements.get('s-recovery-custom').click();
+  input.value = '00123456';
+  c.context.confirm = () => false;
+  await c.elements.get('s-recovery-custom-save').click();
+  assert.equal(input.readOnly, false);
+  assert.equal(input.value, '00123456');
+  await c.elements.get('s-recovery-cancel').click();
+  await c.elements.get('s-recovery-reset').click();
+  assert.equal(c.requests.length, 0);
+  c.context.confirm = () => true;
+  await c.elements.get('s-recovery-reset').click();
+  assert.deepEqual(c.requests, [{ url: '/api/recovery', code: 'TEST1', token: 'test-token' }]);
+  assert.equal(c.context.me.recoveryCode, '87654321');
+  assert.equal(input.value, '87654321');
+  assert.equal(input.readOnly, true);
+});
+
+test('更换失败保留旧码和输入，解锁按钮以便重试', async () => {
+  const c = settingsClient();
+  const oldCode = c.context.me.recoveryCode;
+  c.context.api = async () => { throw new Error('此恢复码不可用'); };
+  await c.elements.get('s-recovery-custom').click();
+  c.elements.get('s-recovery').value = '00123456';
+  await c.elements.get('s-recovery-custom-save').click();
+  assert.equal(c.context.me.recoveryCode, oldCode);
+  assert.equal(c.elements.get('s-recovery').value, '00123456');
+  assert.equal(c.elements.get('s-recovery').readOnly, false);
+  for (const id of ['s-recovery', 's-recovery-reset', 's-recovery-custom-save', 's-recovery-custom', 's-recovery-cancel']) assert.equal(c.elements.get(id).disabled, false);
+  assert.equal(c.result.saved, undefined);
+  assert.equal(c.messages.at(-1), '此恢复码不可用');
+});
+
+test('保存中禁止重复更换，迟到响应不覆盖新身份', async () => {
+  const c = settingsClient();
+  let resolve;
+  let calls = 0;
+  c.context.api = () => { calls++; return new Promise((done) => { resolve = done; }); };
+  await c.elements.get('s-recovery-custom').click();
+  c.elements.get('s-recovery').value = '00123456';
+  const pending = c.elements.get('s-recovery-custom-save').click();
+  for (const id of ['s-recovery', 's-recovery-reset', 's-recovery-custom-save', 's-recovery-custom', 's-recovery-cancel']) assert.equal(c.elements.get(id).disabled, true);
+  await c.elements.get('s-recovery-reset').click();
+  await c.elements.get('s-recovery-custom-save').click();
+  await c.elements.get('s-recovery-cancel').click();
+  assert.equal(c.elements.get('s-recovery').readOnly, false);
+  assert.equal(calls, 1);
+  const nextIdentity = { code: 'NEXT1', recoveryCode: '11223344' };
+  c.context.me = nextIdentity;
+  resolve({ recoveryCode: '00123456' });
+  await pending;
+  assert.equal(c.context.me, nextIdentity);
+  assert.equal(c.context.me.recoveryCode, '11223344');
+  assert.equal(c.result.saved, undefined);
+});
