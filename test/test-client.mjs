@@ -424,23 +424,36 @@ test('退出重置页面、滚动位置与展开状态，新房间从投骰页�
 function settingsClient() {
   const c = roomClient();
   const requests = [], messages = [];
-  const modal = { innerHTML: '', querySelectorAll: () => [] };
-  for (const id of ['s-name', 's-recovery', 's-recovery-copy', 's-recovery-save', 's-recovery-reset', 's-recovery-custom', 's-recovery-custom-save', 's-recovery-cancel', 's-recovery-actions', 's-recovery-edit', 's-clear', 's-leave', 's-close']) {
-    c.elements.set(id, {
-      value: '', disabled: false, attributes: {},
-      addEventListener(event, callback) { this[event] = callback; },
-      focus() { c.context.document.activeElement = this; },
-      select() { this.selected = true; },
-      setAttribute(name, value) { this.attributes[name] = value; },
-      removeAttribute(name) { delete this.attributes[name]; },
-    });
-  }
+  const modalIds = new Set();
+  const modal = {
+    content: '', querySelectorAll: () => [],
+    get innerHTML() { return this.content; },
+    set innerHTML(content) {
+      this.content = content;
+      for (const id of modalIds) {
+        c.elements.get(id).isConnected = false;
+        c.elements.delete(id);
+      }
+      modalIds.clear();
+      for (const [, id] of content.matchAll(/\bid="([^"]+)"/g)) {
+        modalIds.add(id);
+        c.elements.set(id, {
+          value: '', disabled: false, attributes: {}, isConnected: true,
+          addEventListener(event, callback) { this[event] = callback; },
+          focus() { if (this.isConnected) c.context.document.activeElement = this; },
+          select() { this.selected = true; },
+          setAttribute(name, value) { this.attributes[name] = value; },
+          removeAttribute(name) { delete this.attributes[name]; },
+        });
+      }
+    },
+  };
   Object.assign(c.context, {
     $modal: modal, AVATARS: [], confirm: () => true,
     toast: (message) => messages.push(message),
     saveMe: () => { c.saved = c.context.me.recoveryCode; },
     renderRoom: () => {}, setupModal: (id) => { c.focus = id; },
-    closeModal: () => {},
+    closeModal: () => { modal.innerHTML = ''; },
     api: async (url, body) => { requests.push({ url, ...body }); return { recoveryCode: body.recoveryCode ?? '87654321' }; },
   });
   c.context.me.token = 'test-token';
@@ -561,3 +574,62 @@ test('保存中禁止重复更换，迟到响应不覆盖新身份', async () =>
   assert.equal(c.context.me.recoveryCode, '11223344');
   assert.equal(c.result.saved, undefined);
 });
+
+for (const action of ['reset', 'custom-save']) {
+  for (const nextModal of ['closed', 'settings', 'other']) {
+    test(`${action} 保存期间切换到 ${nextModal}，迟到响应同步当前恢复码且不干扰其他输入`, async () => {
+      const c = settingsClient();
+      let resolve;
+      c.context.api = () => new Promise((done) => { resolve = done; });
+      if (action === 'custom-save') {
+        await c.elements.get('s-recovery-custom').click();
+        c.elements.get('s-recovery').value = '00123456';
+      }
+      const oldInput = c.elements.get('s-recovery');
+      const pending = c.elements.get(`s-recovery-${action}`).click();
+      c.context.closeModal();
+      assert.equal(oldInput.isConnected, false);
+      let focused;
+      if (nextModal === 'settings') {
+        c.context.openSettings();
+        const input = c.elements.get('s-recovery');
+        assert.notEqual(input, oldInput);
+        assert.equal(input.value, c.context.me.recoveryCode);
+        focused = c.elements.get('s-name');
+        focused.value = '尚未保存的昵称';
+        focused.focus();
+      } else if (nextModal === 'other') {
+        c.modal.innerHTML = '<input id="b-note">';
+        focused = c.elements.get('b-note');
+        focused.value = '尚未保存的备注';
+        focused.focus();
+      }
+      resolve({ recoveryCode: '00123456' });
+      await pending;
+      assert.equal(c.context.me.recoveryCode, '00123456');
+      assert.equal(c.result.saved, '00123456');
+      assert.deepEqual(c.messages, ['恢复码已更新，请重新保存']);
+      if (nextModal === 'settings') {
+        const input = c.elements.get('s-recovery');
+        assert.equal(input.value, '00123456');
+        assert.equal(input.readOnly, true);
+        assert.equal(input.disabled, false);
+        assert.equal(c.elements.get('s-recovery-actions').hidden, false);
+        assert.equal(c.elements.get('s-recovery-edit').hidden, true);
+        assert.equal(c.elements.get('s-recovery-copy').disabled, false);
+        assert.equal(c.elements.get('s-recovery-save').disabled, false);
+        assert.equal(c.elements.get('s-name'), focused);
+        assert.equal(focused.value, '尚未保存的昵称');
+      } else if (nextModal === 'other') {
+        assert.equal(c.elements.get('b-note'), focused);
+        assert.equal(focused.value, '尚未保存的备注');
+        assert.equal(c.elements.has('s-recovery'), false);
+      } else {
+        assert.equal(c.modal.innerHTML, '');
+        c.context.openSettings();
+        assert.equal(c.elements.get('s-recovery').value, '00123456');
+      }
+      if (focused) assert.equal(c.context.document.activeElement, focused);
+    });
+  }
+}

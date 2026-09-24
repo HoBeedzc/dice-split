@@ -1115,16 +1115,18 @@ function openSettings(initialFocus = 's-name') {
   const recoveryButtons = [recoveryReset, recoveryCustom, recoverySave, recoveryCancel];
   let recoveryBusy = false;
   const setRecoveryEditing = (editing) => {
-    recoveryInput.readOnly = !editing;
-    recoveryInput.value = editing && !/^[0-9]{8}$/.test(identity.recoveryCode || '') ? '' : identity.recoveryCode || '';
-    recoveryInput.placeholder = editing ? '输入 8 位数字' : '此设备尚无恢复码，请先生成';
+    const currentInput = document.getElementById('s-recovery');
+    if (!currentInput) return;
+    currentInput.readOnly = !editing;
+    currentInput.value = editing && !/^[0-9]{8}$/.test(identity.recoveryCode || '') ? '' : identity.recoveryCode || '';
+    currentInput.placeholder = editing ? '输入 8 位数字' : '此设备尚无恢复码，请先生成';
     for (const [name, value] of Object.entries({ maxlength: '8', inputmode: 'numeric', pattern: '[0-9]{8}', 'aria-describedby': 's-recovery-hint' })) {
-      if (editing) recoveryInput.setAttribute(name, value);
-      else recoveryInput.removeAttribute(name);
+      if (editing) currentInput.setAttribute(name, value);
+      else currentInput.removeAttribute(name);
     }
     document.getElementById('s-recovery-actions').hidden = editing;
     document.getElementById('s-recovery-edit').hidden = !editing;
-    recoveryReset.textContent = identity.recoveryCode ? '重置恢复码' : '生成个人恢复码';
+    document.getElementById('s-recovery-reset').textContent = identity.recoveryCode ? '重置恢复码' : '生成个人恢复码';
     document.getElementById('s-recovery-copy').disabled = !identity.recoveryCode;
     document.getElementById('s-recovery-save').disabled = !identity.recoveryCode;
   };
@@ -1154,7 +1156,7 @@ function openSettings(initialFocus = 's-name') {
       recoveryBusy = false;
       recoveryButtons.forEach((button) => { button.disabled = false; });
       recoveryInput.disabled = false;
-      if (me === identity) recoveryInput.focus();
+      if (me === identity && recoveryInput.isConnected) recoveryInput.focus();
     }
   };
   recoveryReset.addEventListener('click', () => { if (recoveryInput.readOnly) return updateRecovery(); });
