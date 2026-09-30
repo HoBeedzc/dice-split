@@ -15,9 +15,17 @@ const PORT = Number(process.argv[2] || process.env.PORT || 8787);
 const PASSCODE = String(process.env.PASSCODE || process.argv[3] || '');
 const TEMPORARY_MODE = !PASSCODE;
 const ROOM_CONNECT_TIMEOUT_MS = 15000;
-const MAX_ROOMS = Number(process.env.MAX_ROOMS || 100);      // 全服房间数上限，防资源滥用
-const MAX_HISTORY = Number(process.env.MAX_HISTORY || 1000); // 每房间账目条数上限
-const RATE_LIMIT = Number(process.env.RATE_LIMIT || 240);    // 同一网络的八位成员会共享 IP 限额。
+// 数值环境变量须为正整数：NaN 会让上限失效或全站限流，非法配置回退默认值并在启动日志提醒。
+function intEnv(name, fallback) {
+  const raw = process.env[name];
+  const n = Number(raw);
+  if (Number.isSafeInteger(n) && n > 0) return n;
+  if (raw) console.warn(`环境变量 ${name}=${raw} 不是正整数，已使用默认值 ${fallback}`);
+  return fallback;
+}
+const MAX_ROOMS = intEnv('MAX_ROOMS', 100);      // 全服房间数上限，防资源滥用
+const MAX_HISTORY = intEnv('MAX_HISTORY', 1000); // 每房间账目条数上限
+const RATE_LIMIT = intEnv('RATE_LIMIT', 240);    // 同一网络的八位成员会共享 IP 限额。
 const DATA_FILE = process.env.DICE_DATA || path.join(__dirname, 'dice-split-data.json');
 const INDEX_HTML = path.join(__dirname, 'public', 'index.html');
 

@@ -287,6 +287,21 @@ try {
   ok((await limited.request('GET', '/api/ping?code=missing&token=missing')).status === 429, '耗尽额度后继续请求仍为 429，不能以非 500 代替');
   await limited.stop();
 
+  console.log('—— 非法环境变量回退默认值 ——');
+  const fallback = await launch(path.join(temp, 'fallback-env.json'), {
+    PASSCODE: '', RATE_LIMIT: 'abc', MAX_HISTORY: 'xyz', MAX_ROOMS: '',
+  });
+  ok(fallback.logs.includes('RATE_LIMIT=abc 不是正整数') && fallback.logs.includes('MAX_HISTORY=xyz 不是正整数'),
+    '非法数值环境变量启动时提醒并回退默认值');
+  ok(!fallback.logs.includes('MAX_ROOMS'), '空字符串视为未配置，不提醒');
+  const fallbackStatuses = [];
+  for (let i = 0; i < 241; i++) {
+    fallbackStatuses.push((await fallback.request('GET', '/api/ping?code=missing&token=missing')).status);
+  }
+  ok(fallbackStatuses.slice(0, 240).every((status) => status === 401), 'RATE_LIMIT 回退默认 240：前 240 次均到达身份校验');
+  ok(fallbackStatuses[240] === 429, 'RATE_LIMIT 回退默认 240：第 241 次返回 429');
+  await fallback.stop();
+
   console.log('—— 旧数据默认字段升级 ——');
   const legacyRoom = structuredClone(saved()[p1.code]);
   delete legacyRoom.repayments;
