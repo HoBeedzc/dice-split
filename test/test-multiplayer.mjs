@@ -75,16 +75,16 @@ function privateBill(room) {
   for (const key of ['roll', 'rolls', 'ratio', 'shares']) assert.equal(room.bill[key], undefined, `rolling must omit ${key}`);
 }
 // Independent integer oracle: no floating-point rounding or production helper reuse.
+// Mirrors the cents rule: non-min rollers floor their exact share, the min roller takes the
+// whole remainder, and equal minima resolve to the earliest participant in canonical order.
 function apportioned(total, rolls, participants) {
   const denominator = BigInt(sum(participants.map((id) => rolls[id])));
-  const rows = participants.map((id, order) => {
-    const numerator = BigInt(total) * BigInt(rolls[id]);
-    return { id, order, base: Number(numerator / denominator), remainder: numerator % denominator };
-  });
-  const remaining = total - sum(rows.map((row) => row.base));
-  const ranked = [...rows].sort((a, b) => a.remainder === b.remainder ? a.order - b.order : a.remainder > b.remainder ? -1 : 1);
-  for (const row of ranked.slice(0, remaining)) row.base++;
-  return Object.fromEntries(rows.map((row) => [row.id, row.base]));
+  let taker = participants[0];
+  for (const id of participants) if (rolls[id] < rolls[taker]) taker = id;
+  const shares = {};
+  for (const id of participants) if (id !== taker) shares[id] = Number(BigInt(total) * BigInt(rolls[id]) / denominator);
+  shares[taker] = total - sum(participants.filter((id) => id !== taker).map((id) => shares[id]));
+  return shares;
 }
 function checkBalance(room) {
   assert.deepEqual(Object.keys(room.balance).sort(), memberIds(room).sort());
@@ -1105,7 +1105,7 @@ test('repayment cents stay capped at 1e9 even when both net balances exceed the 
   assert.deepEqual(f.state.balance, { p1: 1250000000, p2: -1250000000 });
 });
 
-test('largest-remainder ties use canonical room order, including after restart', async (t) => {
+test('remainder ties on the min roll use canonical room order, including after restart', async (t) => {
   const f = await fixture(t);
   await f.create(3);
   await f.connect();
@@ -1116,9 +1116,10 @@ test('largest-remainder ties use canonical room order, including after restart',
   await f.server.stop('SIGKILL');
   const data = JSON.parse(f.bytes());
   const room = data[f.players[0].code];
-  // Valid saved private rolls force equal highest remainders regardless of the final random roll (1..120).
-  room.bill.rolls.p1 = 120;
-  room.bill.rolls.p2 = 120;
+  // Saved private rolls sit at the minimum possible value, so whatever p3 rolls (1..120) it can
+  // at best tie p1/p2 at the minimum, and canonical order keeps the cent with p1.
+  room.bill.rolls.p1 = 1;
+  room.bill.rolls.p2 = 1;
   writeFileSync(f.file, JSON.stringify(data));
   await f.launch();
   await f.connect();
@@ -1127,6 +1128,35 @@ test('largest-remainder ties use canonical room order, including after restart',
   assert.deepEqual(f.state.bill.participants, ids(3));
   assert.deepEqual(f.state.bill.shares, { p1: 1, p2: 0, p3: 0 });
   assert.deepEqual(f.state.bill.shares, apportioned(1, f.state.bill.rolls, ids(3)));
+  await f.confirmAll();
+});
+
+test('remainder cent goes to the min roller even when a larger fraction belongs to others', async (t) => {
+  const f = await fixture(t);
+  await f.create(3);
+  await f.connect();
+  await f.join();
+  await f.join();
+  await f.change(f.players[0], 'start', { amountCents: 101, payer: 'p1', participants: ids(3) });
+  await f.server.stop('SIGKILL');
+  const data = JSON.parse(f.bytes());
+  const room = data[f.players[0].code];
+  // p1=1/p2=2 makes p1 the min roller for every possible live p3 roll (1..6); ties still canonically
+  // resolve to p1. The leftover cent therefore always lands on p1, even though for rolls like
+  // 1/2/3 the old largest-remainder rule would have handed it to p2 or p3 via bigger fractions.
+  room.bill.rolls.p1 = 1;
+  room.bill.rolls.p2 = 2;
+  writeFileSync(f.file, JSON.stringify(data));
+  await f.launch();
+  await f.connect();
+  privateBill(f.state);
+  await f.change(f.players[2], 'roll');
+  const rolls = f.state.bill.rolls;
+  const expected = { p2: Math.floor(101 * 2 / (3 + rolls.p3)), p3: Math.floor(101 * rolls.p3 / (3 + rolls.p3)) };
+  expected.p1 = 101 - expected.p2 - expected.p3;
+  assert.deepEqual(f.state.bill.shares, expected);
+  assert.equal(sum(Object.values(f.state.bill.shares)), 101);
+  assert.deepEqual(f.state.bill.shares, apportioned(101, rolls, ids(3)));
   await f.confirmAll();
 });
 

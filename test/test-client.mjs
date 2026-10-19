@@ -6,6 +6,9 @@ import vm from 'node:vm';
 const html = readFileSync(new URL('../public/index.html', import.meta.url), 'utf8');
 const connectionSource = html.slice(html.indexOf('async function connect('), html.indexOf('/* ============ 首页'));
 const bindingsSource = html.slice(html.indexOf('function bindRoomEvents()'), html.indexOf('/* ============ 记一笔'));
+// buildShareText 及其依赖（fmt/esc + myRole 段里的 participantsOf/fmtTime）；这些切片加载时只声明不执行。
+const shareSource = html.slice(html.indexOf('const fmt = (cents)'), html.indexOf('// 口令弹窗'))
+  + '\n' + html.slice(html.indexOf('function myRole()'), html.indexOf('function renderRoom('));
 const response = (status, data = {}) => ({ status, ok: status >= 200 && status < 300, json: async () => data });
 
 function client(outcomes = []) {
@@ -633,3 +636,49 @@ for (const action of ['reset', 'custom-save']) {
     });
   }
 }
+
+/* ============ buildShareText 甩群文案 ============ */
+function shareContext() {
+  const context = vm.createContext({ localStorage: { getItem: () => '', setItem: () => {} } });
+  vm.runInContext(shareSource, context);
+  return context;
+}
+
+test('buildShareText 输出带备注、点数、比例、零头归属与站点链接', () => {
+  const { buildShareText } = shareContext();
+  const entry = {
+    // 避开 fmtTime 的「今天/昨天」分支，固定在遥远的过去日期。
+    ts: new Date('2024-05-12T20:15:00').getTime(),
+    amountCents: 32800, note: '火锅', payer: 'p1',
+    participants: ['p1', 'p2'], faces: 6,
+    rolls: { p1: 6, p2: 3 }, ratio: [2, 1],
+    shares: { p1: 21866, p2: 10934 }, rerolls: 0,
+  };
+  const players = { p1: { name: '小明' }, p2: { name: '小红' } };
+  assert.equal(buildShareText(entry, players, 'http://192.168.1.5:8787'), [
+    '🎲 骰子分账 · 5月12日 20:15',
+    '火锅 ¥ 328.00（小明垫付）',
+    '小明 掷6 → 承担 ¥ 218.66',
+    '小红 掷3 → 承担 ¥ 109.34',
+    '点数比 2:1 · 零头归点数最小的小红',
+    '一起玩 → http://192.168.1.5:8787',
+  ].join('\n'));
+});
+
+test('buildShareText 空备注省略、多面骰标注、重掷计数、缺名回退且空 origin 不加尾行', () => {
+  const { buildShareText } = shareContext();
+  const entry = {
+    ts: new Date('2024-05-12T20:15:00').getTime(),
+    amountCents: 101, note: '', payer: 'p2',
+    participants: ['p1', 'p2'], faces: 20,
+    rolls: { p1: 15, p2: 7 }, ratio: [15, 7],
+    shares: { p1: 68, p2: 33 }, rerolls: 2,
+  };
+  assert.equal(buildShareText(entry, {}, ''), [
+    '🎲 骰子分账 · 5月12日 20:15',
+    '¥ 1.01（玩家2垫付）',
+    '玩家1 掷15（20面） → 承担 ¥ 0.68',
+    '玩家2 掷7（20面） → 承担 ¥ 0.33',
+    '点数比 15:7 · 零头归点数最小的玩家2 · 重掷×2',
+  ].join('\n'));
+});

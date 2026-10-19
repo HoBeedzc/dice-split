@@ -228,11 +228,10 @@ function sanitizeAvatar(s, fallback) {
 
 function splitByRatio(totalCents, participants, rolls) {
   const sum = participants.reduce((n, id) => n + rolls[id], 0);
+  // 零头归点数最小者；点数并列按固定成员顺序，避免客户端调整顺序获利。
+  const taker = participants.reduce((a, b) => (rolls[b] < rolls[a] ? b : a));
   const shares = Object.fromEntries(participants.map((id) => [id, Math.floor(totalCents * rolls[id] / sum)]));
-  const remainder = totalCents - Object.values(shares).reduce((n, cents) => n + cents, 0);
-  // 余分按最大余数分配，同余时按固定成员顺序，避免客户端调整顺序获利。
-  const ranked = [...participants].sort((a, b) => (totalCents * rolls[b]) % sum - (totalCents * rolls[a]) % sum);
-  for (let i = 0; i < remainder; i++) shares[ranked[i]]++;
+  shares[taker] = totalCents - participants.reduce((n, id) => (id === taker ? n : n + shares[id]), 0);
   return shares;
 }
 

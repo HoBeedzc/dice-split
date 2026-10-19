@@ -338,6 +338,59 @@ const fmt = (cents) => (cents / 100).toLocaleString('zh-CN', { minimumFractionDi
 const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (m) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
 let passcode = localStorage.getItem('dice-split-pass') || '';
 
+/* ============ 分享与复制 ============ */
+// 剪贴板：clipboard API 在 http://局域网IP 这类非安全上下文里不存在，用 execCommand 兜底。
+async function copyToClipboard(text) {
+  // clipboard.writeText 可能因权限提示无人应答而挂起，超时后趁用户激活还有效立即走 execCommand。
+  try {
+    await Promise.race([
+      navigator.clipboard.writeText(text),
+      new Promise((_, reject) => setTimeout(() => reject(new Error('clipboard-write timeout')), 1500)),
+    ]);
+    return true;
+  } catch (e) {}
+  const ta = document.createElement('textarea');
+  ta.value = text;
+  ta.setAttribute('readonly', '');
+  ta.style.cssText = 'position:fixed;left:-9999px;top:0;opacity:0';
+  document.body.appendChild(ta);
+  ta.focus();
+  ta.select(); ta.setSelectionRange(0, text.length); // iOS Safari 需显式选区才认 copy
+  let ok = false;
+  try { ok = document.execCommand('copy'); } catch (e) {}
+  ta.remove();
+  return ok;
+}
+// HTTPS 部署下优先系统分享面板，用户取消不算失败；返回 shared / cancel / copied / failed。
+async function shareText(text, title) {
+  if (navigator.share) {
+    try { await navigator.share({ title, text }); return 'shared'; }
+    catch (e) { if (e && e.name === 'AbortError') return 'cancel'; }
+  }
+  return (await copyToClipboard(text)) ? 'copied' : 'failed';
+}
+// 甩群文案（纯函数）。entry 为已揭晓的账单或历史记录；零头规则与服务端一致。
+function buildShareText(entry, players, origin) {
+  const ps = participantsOf(entry);
+  const name = (id) => (players && players[id] && players[id].name) || id.replace(/^p/, '玩家');
+  const rolls = entry.rolls || {};
+  const taker = ps.reduce((a, b) => (rolls[b] || 0) < (rolls[a] || 0) ? b : a);
+  const lines = [
+    `🎲 骰子分账 · ${fmtTime(entry.ts || Date.now())}`,
+    `${entry.note ? entry.note + ' ' : ''}¥ ${fmt(entry.amountCents)}（${name(entry.payer)}垫付）`,
+    ...ps.map((id) => `${name(id)} 掷${rolls[id]}${entry.faces > 6 ? `（${entry.faces}面）` : ''} → 承担 ¥ ${fmt((entry.shares || {})[id] || 0)}`),
+    `点数比 ${(entry.ratio || []).join(':')} · 零头归点数最小的${name(taker)}${entry.rerolls ? ` · 重掷×${entry.rerolls}` : ''}`,
+  ];
+  if (origin) lines.push(`一起玩 → ${origin}`);
+  return lines.join('\n');
+}
+async function shareResult(entry) {
+  if (!entry) return;
+  const r = await shareText(buildShareText(entry, room.players, location.origin), '骰子分账');
+  if (r === 'copied') toast('结果已复制，去粘贴给搭子');
+  else if (r === 'failed') toast('复制失败，试试截图分享');
+}
+
 // 口令弹窗：服务端要求口令时出现，输入后自动重试原请求
 function askPasscode() {
   return new Promise((resolve) => {
@@ -665,6 +718,8 @@ function renderRoom(scrollY = window.scrollY) {
       <div class="diebox ${result || b.rolled?.[id] ? 'rolled-ok' : ''}">
         <div class="who">${ph(P[id], id)}${id === r ? '（我）' : ''}</div>${dieFace(id)}
       </div>`).join('')}</div>`;
+    // 零头归属展示，规则与服务端一致：点数最小，并列取先加入。
+    const taker = result && b.rolls ? participants.reduce((a, id) => (b.rolls[id] || 0) < (b.rolls[a] || 0) ? id : a) : null;
     let actions = '';
     if (b.pending) {
       const verb = b.pending.type === 'reroll' ? '重掷' : '作废这笔';
@@ -680,12 +735,13 @@ function renderRoom(scrollY = window.scrollY) {
       }
       actions += '<button class="btn plain" id="a-void">提议作废这笔</button>';
     }
+    if (result) actions += '<button class="btn plain small" id="a-share">📋 复制结果</button>';
     billHtml = `<section class="card fadein" aria-label="当前分账">
       <div class="billhead">
         <div class="amt">¥ ${fmt(b.amountCents)}</div>
         <div class="note">${b.note ? esc(b.note) + ' · ' : ''}垫付：${ph(P[b.payer], b.payer)}</div>
       </div>
-      <p class="hint">${participants.length} 人参与 · 每人 1–${esc(b.faces)} 点 · 点数比就是分账比<br>参与名单已锁定，新加入的成员不影响这一笔。</p>
+      <p class="hint">${participants.length} 人参与 · 每人 1–${esc(b.faces)} 点 · 点数比就是分账比${taker ? `，零头归点数最小的${esc(memberName(taker))}（并列按加入顺序）` : '，零头归点数最小者'}<br>参与名单已锁定，新加入的成员不影响这一笔。</p>
       ${!participating ? `<p class="hint">${eligible ? '你不分摊这一笔，但临时模式替换旧账本需要你确认；也可提议或回应重掷、作废。' : '你未参与这一笔，仅可查看，无需操作。'}</p>` : ''}
       ${diceHtml}
       ${result ? `
@@ -717,6 +773,7 @@ function renderRoom(scrollY = window.scrollY) {
           <div class="who">${ph(P[id], id)}</div><div class="dice" aria-label="${esc(h.rolls?.[id])} 点">${dieGlyph(h.rolls?.[id])}</div>
           <div class="hint">比例 ${esc(h.ratio?.[i] ?? '—')}</div><div class="m">¥ ${fmt(h.shares?.[id] || 0)}</div>
         </div>`).join('')}</div>
+        <button class="btn plain small" data-share="${esc(h.id)}">📋 复制结果</button>
       </details>
     </article>`;
   }).join('') : `<div class="empty">账本还空着<br>${temporaryMode ? '这里只保留最近一笔分账' : '每次确认的分账都会记在这里'}</div>`;
@@ -843,12 +900,9 @@ function bindRoomEvents() {
 
   on('a-invite', async () => {
     const link = location.origin + '/#' + room.code;
-    const text = `【骰子分账】房间码 ${room.code}，点这里加入：${link}`;
-    try {
-      if (navigator.share) { await navigator.share({ title: '骰子分账', text }); return; }
-      await navigator.clipboard.writeText(text);
-      toast('邀请已复制，去微信粘贴给 TA');
-    } catch (e) { toast('复制失败，手动输入房间码吧: ' + room.code); }
+    const r = await shareText(`【骰子分账】房间码 ${room.code}，点这里加入：${link}`, '骰子分账');
+    if (r === 'copied') toast('邀请已复制，去微信粘贴给 TA');
+    else if (r === 'failed') toast('复制失败，手动输入房间码吧: ' + room.code);
   });
   $app.querySelectorAll('[data-room-page]').forEach((button) => button.addEventListener('click', () => switchRoomPage(button.dataset.roomPage)));
   on('a-ledger-pending', () => switchRoomPage('ledger', true));
@@ -878,12 +932,16 @@ function bindRoomEvents() {
   on('a-reroll', () => { act({ type: 'reroll', proposalId: billProposalId }); });
   on('a-confirm', () => act({ type: 'confirm' }));
   on('a-void', () => { act({ type: 'void', proposalId: billProposalId }); });
+  on('a-share', () => { if (room.bill) shareResult({ ...room.bill, ts: Date.now() }); });
   on('a-approve', () => act({ type: 'respond', proposalId: billProposalId, approve: true }));
   on('a-reject', () => act({ type: 'respond', proposalId: billProposalId, approve: false }));
   on('a-withdraw', () => act({ type: 'withdraw', proposalId: billProposalId }));
   document.querySelectorAll('[data-del]').forEach((b) => b.addEventListener('click', () => {
     if (ledgerBusy()) return;
     if (confirm(temporaryMode ? '提议删除这笔临时分账及其还款？所有成员同意后清理记录与还款净额汇总，余额归零。' : '提议删除这条消费？所有成员同意后才会删除并重算余额。')) act({ type: 'deleteHistory', id: b.dataset.del });
+  }));
+  document.querySelectorAll('[data-share]').forEach((b) => b.addEventListener('click', () => {
+    shareResult(room.history.find((h) => h.id === b.dataset.share));
   }));
   document.querySelectorAll('[data-del-repayment]').forEach((b) => b.addEventListener('click', () => {
     if (ledgerBusy()) return;
@@ -1096,8 +1154,8 @@ function openSettings(initialFocus = 's-name') {
   const recoveryInput = document.getElementById('s-recovery');
   recoveryInput.addEventListener('click', () => { if (recoveryInput.readOnly) recoveryInput.select(); });
   document.getElementById('s-recovery-copy').addEventListener('click', async () => {
-    try { await navigator.clipboard.writeText(identity.recoveryCode); toast('个人恢复码已复制，请私下保存'); }
-    catch (e) { document.getElementById('s-recovery')?.select(); toast('无法自动复制，请手动复制已选中的恢复码'); }
+    if (await copyToClipboard(identity.recoveryCode)) toast('个人恢复码已复制，请私下保存');
+    else { document.getElementById('s-recovery')?.select(); toast('无法自动复制，请手动复制已选中的恢复码'); }
   });
   document.getElementById('s-recovery-save').addEventListener('click', () => {
     const text = `骰子分账 · 个人恢复凭据（请保密）\n服务器：${location.origin}\n房间码：${identity.code}\n成员编号：${identity.role}\n恢复码：${identity.recoveryCode}\n\n在首页选择「恢复身份」，输入房间码与恢复码。恢复将使原设备登录失效。\n临时房间已销毁时无法恢复。重置恢复码后请更新此文件。\n`;

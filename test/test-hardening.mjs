@@ -405,10 +405,12 @@ try {
       const roll1 = await update(guest1, 'roll');
       const roll2 = await update(guest2, 'roll');
       must(current.phase === 'result' && current.bill.rolls.p1 === roll1.roll && current.bill.rolls.p2 === roll2.roll, '必须完成真实双人掷骰');
-      const shares = {
-        p1: Math.round(amountCents * roll1.roll / (roll1.roll + roll2.roll)),
-      };
-      shares.p2 = amountCents - shares.p1;
+      const rollSum = roll1.roll + roll2.roll;
+      const minIsP1 = roll1.roll <= roll2.roll; // 零头归点数最小者，并列按加入顺序归 p1
+      const shares = minIsP1
+        ? { p2: Math.floor(amountCents * roll2.roll / rollSum) }
+        : { p1: Math.floor(amountCents * roll1.roll / rollSum) };
+      shares[minIsP1 ? 'p1' : 'p2'] = amountCents - Object.values(shares)[0];
       await update(guest1, 'confirm');
       ok(current.phase === 'result' && equal(ledger(), before), `${note}：单方确认不替换历史`);
       await update(guest2, 'confirm');

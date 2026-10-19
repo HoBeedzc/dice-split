@@ -391,7 +391,10 @@ async function runFlow() {
     const gcd = (a, b) => b ? gcd(b, a % b) : a;
     const divisor = gcd(r1.roll, r2.roll);
     ok(equal(s.bill.ratio, [r1.roll / divisor, r2.roll / divisor]), '比例正确化简');
-    ok(s.bill.shares.p1 === Math.round(10000 * r1.roll / (r1.roll + r2.roll)) && s.bill.shares.p1 + s.bill.shares.p2 === 10000, '金额拆分与尾差合计正确');
+    const shareSum = r1.roll + r2.roll;
+    const minIsP1 = r1.roll <= r2.roll; // 零头归点数最小者，并列按加入顺序归 p1
+    const otherFloor = Math.floor(10000 * (minIsP1 ? r2.roll : r1.roll) / shareSum);
+    ok(s.bill.shares[minIsP1 ? 'p1' : 'p2'] === 10000 - otherFloor && s.bill.shares.p1 + s.bill.shares.p2 === 10000, '金额拆分与零头合计正确');
 
     console.log('—— 分账提议身份 / 迟到请求 / 同名动作防绕过 ——');
     for (const type of ['reroll', 'void']) {
