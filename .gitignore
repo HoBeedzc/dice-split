@@ -3,5 +3,6 @@ node_modules/
 .env
 .env.*
 *.log
+.zcode/
 /dice-split-data.json
 /dice-split-data.json.tmp-*
